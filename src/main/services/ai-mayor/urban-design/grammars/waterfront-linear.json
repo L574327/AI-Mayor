@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "id": "waterfront-linear",
+  "version": "1.0.0",
+  "identity": ["shoreline oriented", "public edge", "inland cross-links"],
+  "prompt": {
+    "name": "Waterfront Linear",
+    "summary": "A connected waterfront sequence with inland links and a protected public edge.",
+    "variation": "Follow a simplified safe shoreline curve, vary nodes and cross-link cadence, and keep the district connected inland."
+  },
+  "parameters": {
+    "shoreSetbackBand": { "min": 24, "max": 80 },
+    "crossLinkSpacing": { "min": 80, "max": 180 },
+    "waterfrontNodeCadence": { "min": 120, "max": 320 },
+    "greenEdgeRatio": { "min": 0.12, "max": 0.45 }
+  },
+  "motifs": [
+    {
+      "id": "promenade-spine",
+      "name": "Promenade Spine",
+      "summary": "A continuous public-facing shoreline spine with inland links.",
+      "operators": ["shoreline-spine", "parallel-spine", "cross-links"]
+    },
+    {
+      "id": "waterfront-nodes",
+      "name": "Waterfront Nodes",
+      "summary": "Alternating active nodes and green shoreline sections.",
+      "operators": [
+        "shoreline-spine",
+        "civic-node",
+        "green-anchor",
+        "cross-links"
+      ]
+    },
+    {
+      "id": "harbor-fingers",
+      "name": "Harbor Fingers",
+      "summary": "Bounded perpendicular fingers where the shoreline geometry permits.",
+      "operators": ["shoreline-spine", "cross-links", "branch"]
+    }
+  ],
+  "adaptationRules": [
+    {
+      "when": { "waterRelationship": ["river_edge", "coastline"] },
+      "preferMotif": "promenade-spine",
+      "preferOperator": "shoreline-spine"
+    },
+    {
+      "when": { "areaClass": ["waterfront"] },
+      "preferMotif": "waterfront-nodes",
+      "preferOperator": "civic-node"
+    },
+    {
+      "when": { "waterRelationship": ["crossing"] },
+      "preferMotif": "harbor-fingers",
+      "preferOperator": "cross-links"
+    }
+  ],
+  "preferences": {
+    "roadHierarchyCoherence": 0.82,
+    "connectivity": 0.88,
+    "frontageUtilization": 0.8,
+    "terrainFit": 0.72,
+    "shorelineFit": 1,
+    "blockScaleFit": 0.68,
+    "blockVariation": 0.7,
+    "deadEndControl": 0.86,
+    "landUseBuffering": 0.8,
+    "greenDistribution": 0.9,
+    "noveltyDistance": 0.82
+  },
+  "antiPatterns": {
+    "maxDeadEndRatio": 0.14,
+    "maxDisconnectedComponents": 0,
+    "maxRepeatedMotifRatio": 0.58,
+    "minTerrainFit": 0.55
+  },
+  "mixing": {
+    "allowInfluenceDimensions": [
+      "density",
+      "commercial",
+      "green",
+      "block_scale",
+      "transit"
+    ]
+  }
+}

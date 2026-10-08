@@ -1,0 +1,13 @@
+export { SkillRegistry, type RegisteredSkill } from "./registry/skill-registry";
+export { compileSkillIntent, createSkillRegistry } from "./registry/runtime";
+export { parseSkillManifest, SkillManifestSchema, type SkillManifest } from "./schemas/manifest";
+export { SkillIntentSchema, type SkillIntentInput } from "./schemas/intent";
+export type { SkillAdapter, SkillAdapterContext, SkillIntent } from "./adapters/port";
+export { CommissionUtilitiesAdapter } from "./adapters/k05-commission-utilities";
+export { SkillExecutionAdapter } from "./adapters/skill-execution-adapter";
+export { K05DomainDispatchAdapter } from "./adapters/k05-domain-dispatch-adapter";
+export { K05CommissionUtilitiesWorkflowAdapter, K05_ELECTRICITY_RECIPE, type K05UtilityAdmission, type K05ElectricityAdmission, type K05AuthoritativeProductionContext } from "./adapters/k05-commission-utilities-workflow";
+export { executeSkillIntent, executeProductionSkillIntent, type ProductionSkillWorkflow, type SkillEvidenceSink } from "./runtime/skill-execution-runtime";
+export type { SkillResult } from "./schemas/result";
+export { K05CommissionUtilitiesDefinition, K05_COMMISSION_UTILITIES_MANIFEST } from "./definitions/k05-commission-utilities";
+export type { SkillDefinition } from "./definitions/types";

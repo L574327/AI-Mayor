@@ -1,0 +1,19 @@
+.custom-titlebar {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding-top: 5px;
+  height: 30px;
+  width: 100%;
+  gap: 2px;
+  z-index: 999999;
+  padding-left: 8px;
+  font-size: 12px;
+  background: rgba(var(--color-bg-sidebar),1);
+  user-select: none;
+  -webkit-app-region: drag;
+}
+
+.custom-titlebar button {
+  -webkit-app-region: no-drag;
+}

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="script-src 'self' https://api.canny.io https://canny.io 'unsafe-inline' 'unsafe-eval'"
+    />
+    <base href="./" />
+    <title>AI Mayor</title>
+    <script>
+      !(function (w, d, i, s) {
+        function l() {
+          if (!d.getElementById(i)) {
+            var f = d.getElementsByTagName(s)[0],
+              e = d.createElement(s);
+            (e.type = 'text/javascript'),
+              (e.async = !0),
+              (e.src = 'https://canny.io/sdk.js'),
+              f.parentNode.insertBefore(e, f);
+          }
+        }
+        if ('function' != typeof w.Canny) {
+          var c = function () {
+            c.q.push(arguments);
+          };
+          (c.q = []),
+            (w.Canny = c),
+            'complete' === d.readyState
+              ? l()
+              : w.attachEvent
+              ? w.attachEvent('onload', l)
+              : w.addEventListener('load', l, !1);
+        }
+      })(window, document, 'canny-jssdk', 'script');
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

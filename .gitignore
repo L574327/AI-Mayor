@@ -1,0 +1,44 @@
+# Logs
+logs
+*.log
+
+# Runtime data
+pids
+*.pid
+*.seed
+
+# Coverage directory used by tools like istanbul
+coverage
+.eslintcache
+
+# Dependency directory
+# https://www.npmjs.org/doc/misc/npm-faq.html#should-i-check-my-node_modules-folder-into-git
+node_modules
+
+# OSX
+.DS_Store
+
+release/
+.erb/dll
+
+.idea
+npm-debug.log.*
+*.css.d.ts
+*.sass.d.ts
+*.scss.d.ts
+/dump.rdb
+/.vscode
+.env
+/.crush
+/.testdata
+
+
+output/
+/.vscode-upload.json
+
+# Local AI Mayor live screenshots are retained as workspace evidence without
+# adding large binary histories. JSONL summaries remain eligible for checkpoints.
+/evidence/**/*.png
+
+mayor-bundle/
+scripts/ai-mayor-dev/stress/

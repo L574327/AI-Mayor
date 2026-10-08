@@ -1,0 +1,35 @@
+name: Daily LLM Commit Summary
+
+on:
+  schedule:
+    - cron: "0 10 * * *"   # 10:00 UTC = 18:00 北京时间
+  workflow_dispatch: {}     # 手动触发
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Shanghai
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.18.0"
+
+      - name: Install dependencies
+        run: |
+          npm install
+
+      - name: Run summarizer
+        env:
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
+          REPO: ${{ secrets.REPO }}
+        run: |
+          npx tsx scripts/daily-summary.ts

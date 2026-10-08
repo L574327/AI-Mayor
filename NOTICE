@@ -1,0 +1,26 @@
+AI Mayor — third-party notices
+
+This product is based on 5ire Community Edition and is not affiliated with 5ire.
+The licence text of that software is kept unmodified in the file LICENSE.
+
+1. CS2MCP (MCP server and game mod "Bridge")
+   Based on the Apache-2.0 project "cities-skylines-2-mcp" (package name cs2-mcp).
+   Copyright 2026 LancerComet.
+   Licensed under the Apache License, Version 2.0. A copy of the licence is in licenses/Apache-2.0.txt.
+   Modified by the AI Mayor authors: the MCP server and the Bridge were extended (safe batch actions, mayor snapshot and planning catalogue,
+   traffic, junction control, road replace, spatial preflight, and many more tools). The original copyright and licence notices are kept.
+
+2. LineTool-CS2
+   The file CS2MCP.Bridge/CreateDefinitions.cs is ported from LineTool-CS2 (https://github.com/algernon-A/LineTool-CS2),
+   Apache-2.0, Copyright algernon. It also contains portions derived from decompiled game code, which are subject to the
+   Paradox Interactive User Agreement. The file carries this notice, which is kept: "Substantial portions derived from game code.
+   Copyright (c) Colossal Order and Paradox Interactive. Not for reuse or distribution except in accordance with the Paradox Interactive End User
+   License Agreement." That code ships only compiled inside CS2MCP.dll (the game mod); no game source or decompiled game code is included in the installer or in the
+   documentation shipped with it.
+
+3. Thanks
+   To the Cities: Skylines II modding community; the public code of LineTool, InfoLoom, Traffic, unity-mcp and others made this project possible.
+   No code of those projects is claimed here beyond what items 1 and 2 state.
+
+4. Libraries
+   The application bundles open-source libraries (Electron, the Model Context Protocol SDK, React and others) under their own licences.

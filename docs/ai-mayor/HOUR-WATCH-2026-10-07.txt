@@ -1,0 +1,8 @@
+﻿BASELINE 10-07 00:36 game=2027-01-09 07:15 pop=21938 money=2136915 balance=1024465 flow=57.3% icons=2829 bottleneck=7 noCar=1 garbage=6 fire=2761
+NOW 10-07 01:47 game=2027-01-12 23:22 pop=26931 money=6134660 balance=1435215 flow=64.4% bottleneck= noCar=3 garbage=23 noise=18 ruins=+
+NOTE 01:55 landfill relaxed to 250/160/100 m from homes in SOURCE (not in the running build; package after the watch)
+NOW 10-07 01:52 game=2028-01-01 05:47 pop=27387 money=6520270 balance=1471498 flow=65.4% bottleneck= noCar=3 garbage=24 noise=18 fire= happy=51 health=56
+RESTART 01:56 new build 01:54 (landfill 250/160/100, corridor widening, roundabout) takeover again
+TODO (user, 02:30): when this round ends, ACT AS PLAYER: complex natural-language requests -> I act as the AI filter (prompt = buildPrompt) -> checkReply -> compiler -> Mayor; report what really works. Complex ability that fails is NOT shipped. Also: interchange capability; the user will ship after traffic is solved.
+END 04:05 package 04:03; sewage solved live; garbage not yet placed (land bought, site refused by preflight)
+06:10 package; incident: relaxed garbage buffers -> air pollution, pop 29k->23k; cleaned; garbage icons 42 unresolved

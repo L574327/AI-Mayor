@@ -1,0 +1,46 @@
+# Open Source License
+
+5ire is licensed under a modified version of the Apache License 2.0, with the following additional conditions:
+
+1. Definitions
+
+"Community Edition": The original software distributed under Apache 2.0.
+"Commercial Use": Any use case defined in Section 3.2 requiring a paid license.
+"5ire Brand": Trademarks, logos, and product names owned by 5ire.
+
+2. License Grants
+
+Community Edition: Licensed under Apache License 2.0 with Additional Terms (Section 3).
+Commercial Edition: Available under a separate proprietary license (contact 5ire for details).
+
+3. Additional Terms to Apache 2.0
+
+3.1 Permitted Use
+
+Free to use, modify, and distribute the Community Edition only if:
+  You do not use the 5ire Brand in any modified versions (including names, logos, or marketing materials).
+  You prominently state: "This product is based on 5ire Community Edition and is not affiliated with 5ire."
+
+3.2 Commercial License Required
+
+You must obtain a commercial license from 5ire if:
+Modification + Distribution: Distribute modified code (directly or as SaaS) and meet any of:
+  (a) Serve enterprise clients (>10 users )
+  (b) Integrate into hardware/products for sale.
+  (c) Government/education procurement involving sensitive data.
+Brand Usage: Use the 5ire Brand in any product, service, or promotion.
+
+3.3 Contributor Agreement
+
+By contributing code, you:
+Grant 5ire exclusive rights to dual-license your contributions (Apache 2.0 + proprietary).
+Waive any patent claims against 5ire's commercial use of your contributions.
+
+4. Trademark Protection
+
+The 5ire Brand is excluded from the Apache 2.0 grant. Unauthorized use is prohibited.
+
+5. Updates & Enforcement
+
+5ire reserves the right to update these terms. Continued use after 30 days constitutes acceptance.
+Violations may result in termination of rights and legal action.

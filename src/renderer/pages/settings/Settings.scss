@@ -1,0 +1,17 @@
+@reference "tailwindcss";
+
+.settings-section {
+  @apply flex;
+  @apply border-t;
+  @apply mt-2.5;
+  --tw-border-opacity: 1;
+  border-color: rgba(var(--color-border), var(--tw-border-opacity));
+}
+
+.settings-section--header {
+  @apply flex-grow-0;
+  @apply px-2.5;
+  @apply py-5;
+  @apply w-28;
+  @apply font-semibold;
+}

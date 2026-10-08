@@ -1,0 +1,15 @@
+.bookmark-item{
+  cursor:default;
+}
+.bookmark-item:hover {
+  --tw-bg-opacity: 0.6;
+  border-color:rgba(var(--color-bg-surface-2), var(--tw-bg-opacity));
+}
+
+.bookmark-topbar {
+  --tw-bg-opacity: 1;
+  background-color: rgba(var(--color-bg-sidebar), var(--tw-bg-opacity));
+}
+[data-theme='dark'] .bookmark :not(.think):not(.think *) {
+  color: #d6d6d6;
+}

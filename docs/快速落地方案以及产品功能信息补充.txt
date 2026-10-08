@@ -1,0 +1,59 @@
+可以。我先把 **“100K 之后，AI Mayor 变成真正可交付产品还缺什么”** 收成一份总清单，重点把你在意的 **免费、外部 AI、API、老玩家存档自治、嘴巴、UI、反停转** 都放进去。
+
+有一个地方我先明确：**我现在能恢复出“免费外部 AI 应该只做 Semantic Frontend、不能碰游戏决策”这个冻结边界，但没有恢复出你当时具体指定的那一家“免费 API / 自动流 API”服务名。** 所以这部分可以让车间把接口、自动路由、fallback 一次做完，但不要让它擅自替你选死某个供应商。Semantic Compiler 的冻结架构本来就是“外部 AI → MayorIntent → 本地确定性 Compiler”，外部 AI 没有游戏权限。AI_MAYOR_SEMANTIC_COMPILER_V1_F…
+
+1. **老玩家存档接管 / Legacy City Stewardship【最高优先级】**：这已经比 0→100K 更像最终产品。Mayor 加载任意成熟城市后，先诊断财政、交通、三网、服务、就业、住房、污染、垃圾、死亡、废弃、外连等，再决定修复/维持/扩张；不能因为某一区卡住让全城停转；不能为了优化随便毁掉玩家已有设计。最后验收不再只是“人口涨”，而是“坏城能救、好城不搞坏、能长期代管”。
+
+2. **全局 Anti-Stall / Liveness Contract【必须】**：任何 `WAIT/FAIL/NO_SITE/REPLAN` 都必须有原因、等待条件、最长等待窗口和升级路径；同一失败指纹不能无限重复；连续无 objective progress 必须触发换策略/换区域/放宽 soft preference/明确 blocked。这个不是新 Brain，而是保证 **Mayor 可以失败，但不能悄悄死机两小时**。
+
+3. **精确 Hands + 通用过滤器/Selector【还没闭合】**：现在缺的不是再造 Planner，而是“精确选谁”。最终需要按类型、区域、状态、关系、作者/来源、例外、保护条件选中对象，再 `OBSERVE → SELECT → ACT → VERIFY → SCOPE_SAFETY`。包括精确拆除、清 zoning、道路升级、替换服务设施、局部修复、只处理问题对象等。没有这个，老玩家存档改善很危险。
+
+4. **成熟城市交通治理【现在明显没闭合】**：拥堵读回、瓶颈定位、路口改造、道路升级、公共交通、停车/步行/自行车、货运、外部连接等。100K 可以靠粗暴扩张绕过去，但“接管别人老城”绕不过去。尤其要从“看到堵车图标”升级成真实交通梯度/路径/瓶颈诊断。
+
+5. **完整城市问题处理 / Remediation【部分】**：电、水、污水已经走得比较深，但垃圾、火灾、倒塌、废弃、救护车/灵车、租金、高技能劳动力、服务满载、污染、商业问题等还没有全部形成 `观察→诊断→动作→读回` 闭环。最终产品应该能救“烂档”，而不只是新建。
+
+6. **财政恢复与坏档救援【需要正式产品化】**：负现金流、贷款高企、服务费爆炸、地块维护费拖垮、错误 zoning/设施过量时，Mayor 要能进入内部恢复状态，削减无效支出、暂停扩张、修复税基和岗位，再恢复正常自治。玩家不需要自己知道当前是 `FINANCIAL_RECOVERY`；如果你坚持单一模式，这些 Profile 最好退成 Mayor 内部状态。
+
+7. **铁路 / 外部连接 / 货运 / Transit 能力【当前大量缺原语】**：这是 100K speedrun 和成熟城市都重要的一块。Passenger rail、多个 outside connection、线路/站点、货运连接、公共交通容量等，都应该最终变成真正可执行能力。当前“策略知道铁路重要但手脚没有”的情况最终不能留在产品里。
+
+8. **道路、桥、隧道、地形的完整工程能力【部分】**：普通道路已经很强，但最终还要可靠区分桥/隧道/高架/坡度/跨河、批量跨越、道路升级和既有路网改造，而不是只会往空地新建。老档里尤其重要。
+
+9. **Semantic Compiler ↔ Hands Capability Map【必须接上】**：Compiler 本身已经证明 typed MayorIntent 可以确定性求值，但这不代表本地真能执行。最终每个 Intent 必须落到 `CLOSED / PARTIAL / UNSUPPORTED` 的真实能力映射，不能向玩家承诺“我能做到”，结果下面根本没有手。自然语言与本地执行能力是两层，冻结规范已经明确分开。AI_MAYOR_SEMANTIC_COMPILER_V1_F…
+
+10. **玩家自然语言输入器 / Semantic Frontend【核心尚未完成】**：玩家最终应该直接说“把东边堵车解决掉，但别拆老城区”“帮我把这座亏损城市救回来”“人口稳定在 12 万左右”。外部 AI 只负责自然语言 → `MayorIntent`，不能输出坐标、施工顺序、prefab、税率动作，更不能成为第二个 Mayor。Compiler 已经做好了，真正缺的是 **自然语言 fidelity 验证 + 正式接线**。当前文件明确说自然语言前端仍未验证。AI_MAYOR_SEMANTIC_COMPILER_V1_F…
+
+11. **免费核心 + 免费外部 AI 层【你特别强调的】**：最终基础产品应该保持 **本地 Mayor 免费可运行、无需 API 也能自治**；旧架构资料本来就把 Local Mayor 定义为 free deterministic expert autopilot，而云 AI 只承担高级布局/风格/长期策略等低频任务。粘贴的文本 (1)(20260928-053322) 外部 AI 最适合只用在两处：① 玩家语言 → MayorIntent；② 少量真正需要开放语义的风格/复杂意图。断网/API 挂了，Mayor 仍然继续自治，不能停城。
+
+12. **免费 Provider / 自动 API 路由层【接口应该现在一次做好】**：做一个很薄的 `SemanticAIProvider` 层，支持免费 provider、用户自己的 Key、未来付费 provider；支持流式响应、timeout、rate-limit、失败 fallback、自动换 provider、缓存相同意图、统一 JSON/MayorIntent 输出；**API 永远不能阻塞 MayorRuntime**。如果免费模型挂掉或额度用完，就退回本地 preset/要求玩家重述，而不是把游戏卡住。你提到的“自动流 API”具体供应商名我现在没有恢复出来，所以建议把 **自动路由/流式/fallback 接口能力**做死，把具体服务做成配置，不让车间猜供应商。
+
+13. **正式 Goal/API【现在其实没有】**：旧审计明确发现没有正式统一的外部 HTTP Mayor Goal API，只有 Electron IPC/preload、旧 Local Mayor、旧 LLM Mayor、Gate1/K05 等多个入口。粘贴的文本 (1)(20260928-053322) 最终应该统一成一个入口：`submitIntent / start / pause / resume / stop / status`，所有 UI、Quick Prompt、自然语言、未来外部 API 都走同一个 Mayor owner，不能再有三套大脑分别控制城市。
+
+14. **收口旧控制路径，只留一个 Mayor【必须】**：之前已经发现旧 Local Mayor、旧 LLM action brain、V2/Gate1、direct Skill IPC 并存。最终应该复用旧系统的好手脚和 readback，但**跨域“下一步做什么”的权力只能有一个**。旧审计已经明确建议：Quick Prompt、free text、API 全部进入结构化 intent，同一时刻只有一个决策 owner。粘贴的文本 (1)(20260928-053322)
+
+15. **Mayor 的嘴巴 / Voice Renderer【研究已完成，尚待产品接入】**：`AI_MAYOR_VOICE_BIBLE_V1.md` 那套 0-token 本地表达器直接接上。MayorEvent → 本地句式积木 → 去重窗口 → UI/字幕。不要每句话调 AI。正常施工几乎零成本；同类事件 3–5 次不重复；严重故障才完整解释。它应该是旁路消费者，嘴巴坏了不能影响施工。
+
+16. **正式操作面板 / UI【最终用户必须有】**：用户不应该看到 MCP、Bridge、脚本、环境变量。最终只需要类似：启动 Mayor、暂停、停止、当前城市健康、Mayor 正在做什么、为什么等待/阻塞、最近改善、财政/人口/交通/三网、玩家自然语言输入。你如果坚持单模式，就不要给用户看一堆 Profile；内部自动切状态即可。
+
+17. **玩家侧 Recorder / Evidence Bundle【发布后非常重要】**：每个玩家机器上本地记录结构化决策、world snapshot 摘要、action/readback、stall reason、版本、模组/DLC 环境、最近错误。出问题时“一键导出诊断包”，而不是让玩家截图或你远程猜。默认本地保存，用户主动选择是否上传，避免隐私和日志膨胀。
+
+18. **存档/检查点/崩溃恢复产品化【部分已有】**：正式版要自动识别当前 world/generation，避免 stale replay；危险施工前合理 checkpoint；崩溃重启后先读世界再恢复；绝不因为历史 ledger 认为“做过”就阻止当前世界修复。玩家不应该理解 durable ledger。
+
+19. **真实玩家存档 Benchmark Corpus【你最新方向】**：收集 vanilla/少模组的公开存档，至少覆盖 Healthy、Stalled、Financial Distress、Infrastructure Failure、Traffic Failure、Legacy Mess。每档跑 30–60 分钟，看 KPI 是否改善、是否乱拆、是否停转。这个会比单纯 0→100K 更能证明产品价值。
+
+20. **长期无人值守 Soak【发布门槛】**：不是跑 100K 就结束。至少多地图、多旧档、数小时/过夜运行，验证不会资源泄漏、不会重复建设、不会因为单区 blocker 停全城、不会在世界切换/加载后读旧状态。
+
+21. **版本 / DLC / 模组 Capability Probe【产品化必须】**：不要把 1.6.2 的资产、税率、火车、服务规则永久写死。启动时读游戏版本和能力，标记支持/不支持；版本升级后 version-sensitive 策略进入待复核，而不是照旧执行。
+
+22. **最终安装/发布形态【最后一刀】**：用户安装一次，游戏启动后 Mayor 自动连接；不要求装 Node、跑脚本、开 CMD、配置 MCP。提供一键安装/卸载、日志、版本检查、Bridge 状态和最小诊断。外部 AI 是可选增强，不是安装前提。
+
+如果你真要让车间“100K 一过就一气呵成”，我反而建议**不要把上面 22 项原样砸过去让它自己理解优先级**。真正的施工顺序应该是：
+
+> **老档接管 + Anti-Stall + 精确 Hands → 交通/城市问题闭环 → Semantic Compiler 接 Hands → 免费自然语言前端/API → Voice → UI/Recorder/Packaging → 真实存档 corpus + 长时 soak。**
+
+其中“免费”这条要冻结一句话：
+
+> **核心 Mayor 永远本地免费可自治；外部 AI 只是可替换、可掉线、低频的语义插件，API 挂了也不能影响城市继续运行。**
+
+这和原先 V2 的“Local Mayor 是 free deterministic expert autopilot”方向是一致的。粘贴的文本 (1)(20260928-053322)
+
+如果你现在要直接给车间，我建议不要再给一份长提示词，而是把这份清单作为 **POST-100K PRODUCT CLOSEOUT BACKLOG** 放进仓库，让车间先按当前代码把 22 项标成 `DONE / PARTIAL / MISSING / BLOCKED`，然后从第 1 项一路收口。

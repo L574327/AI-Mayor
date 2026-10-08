@@ -1,0 +1,24 @@
+# Construction liveness protection
+
+STATUS: WITHDRAWN at the user's request. All product code, runner changes and new liveness tests introduced in this task were removed. The pre-existing W1-W4 changes are retained. This document is a historical record, not a description of active protection. Both test runners were stopped; the game was not reloaded or rolled back. The final manual pause was confirmed by the user and is not evidence of a Bridge deadlock. See LIVE-STARTUP-ANALYSIS-2026-10-04.md for the corrected analysis. Restored-code verification: 3 suites / 75 tests passed.
+
+Scope: protect the existing district strategy from silent, repeated no-effect cycles. No fiscal, density, zoning admission, utility connection, ownership or demolition constraint is relaxed. W1-W4 and sequential road readback remain in place.
+
+- `ConstructionLiveness` watches successful admitted zoning, readback-confirmed district roads/facilities and service maintenance. Land purchases, Goal changes, status changes and simulation time alone do not renew the construction deadline.
+- After 24 game hours OR 15 real minutes without construction, the diagnostic names the ordinary fresh-world re-evaluation. Continued no-effect cycles show `CONSTRUCTION_NEEDS_ATTENTION` with the blocker. Every construction cycle still runs: this observer has no authority to skip, delay, halt, permit or refuse a write. These thresholds only control the warning.
+- No added sleep or Bridge read, including when a warning is active. The initial implementation contained a one-minute retry throttle; that was removed after the user's speed concern, along with an extra simulation wait after BLOCKED. Neither remains in the current version.
+- Missing eligible supply no longer skips service maintenance. It still cannot substitute housing for jobs or select a prohibited role. No-role waits do not run a new growth/finance plan.
+- Tile candidates retain their original order and all admission gates, but bounded four-candidate windows advance through the whole list. A purchased unused tile remains a prohibition on further automatic purchases. Persistent failure is surfaced and throttled, not bypassed.
+- `REPLAN_REQUIRED` invalidates readiness for the next ordinary cycle. Ownership, refusal memory and durable history are never reset for recovery. The original simulation waiting paths are preserved.
+- Role no-site fallback expiry now uses a counter that advances on every public builder cycle, including early waits.
+- The live harness explicitly uses the existing 100,000 target and stops when its existing world-fact observation reaches it. The timed-run bound still applies; reaching the time limit is not a 100K pass.
+
+Validation before removing the throttle: full ai-mayor suite: 156 suites / 2246 tests passed; targeted runtime/builder/role/liveness check: 4 suites / 83 tests passed; additional unused-purchased-tile regression passed (9 liveness tests total). Final checks after removing the throttle are recorded below. Repository TypeScript check still fails on existing dependencies and existing runtime errors; no errors reported in the new liveness module or district-builder file.
+
+Final validation after removing cycle skipping and the additional BLOCKED simulation wait: 4 suites / 84 tests passed (liveness, district builder, role fallback, runtime). The liveness regression specifically proves that a persistent warning still executes the normal scan on every cycle. Diff whitespace check passed. The live runner prints one compact summary per completed tick for visibility.
+
+Live preflight: Bridge reachable; freshly loaded NewGame world, 0 residents, 1,000,000 treasury, paused, native operation Idle. No saved world was loaded by this task. Live results must be read from the separate run log and evidence, not inferred from unit tests.
+
+First live attempt: `tmp/liveness-100k-20261004-212814.*`, stopped at the user's concern. Decision logs recorded three districts: residential 11.1 s, industrial 9.3 s, residential 7.9 s. First tick took 29.9 s, including a 4 s utility repair followed by the existing repair simulation-observation path. Several intervening waits were the existing HOUSING_HELD policy. The new liveness threshold and BLOCKED wait were not reached in the recorded cycles. Subsequent readback: 109 residents / 168 including move-in, native operation Idle, simulation running. No save was reloaded or rolled back by this task.
+
+Limits: this protection cannot create an affordable legal construction opportunity or repair an unimplemented capability. It makes prolonged no-construction behavior visible and advances bounded land candidate search; it does not certify universal construction liveness or automatically stop repeated checks. Accepted zoning uses the builder's existing write-success semantics; it is not proof that a growable building will spawn. Existing global runtime watchdogs and run-ledger halt rules remain unchanged.

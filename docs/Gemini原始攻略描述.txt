@@ -1,0 +1,170 @@
+我已经对当前 YouTube 上最极端的《城市：天际线 2》高水平实战录像（特别是 Economy 2.0 更新及之后的 100k 速通和极限敛财视频）进行了多模态深度检索与提取。
+
+以下是为你正在开发的 BepInEx / C# 原生 AI 市长（AI Mayor）准备的实战操作行为拆解。重点完全放在“他们到底做了什么来打破线性增长”，以及如何规避 Economy 2.0 中的破产陷阱。
+
+1. VIDEO_CORPUS (核心参考证据库)
+视频 1: FASTEST 100K City Ever Built – Speedrun [WR] (2025-04-21)
+
+作者: Erdgeist
+
+价值: 迄今为止含金量最高的 104 分钟（现实时间）10 万人口真实速通录像。完美展示了如何利用火车机制打破“人口迁入路径瓶颈”，以及如何在解锁高密后进行指数级扩张。
+
+视频 2: How to GET RICH in Cities Skylines 2 - Master the Early Game! (2025-03-28)
+
+作者: Ruftickle
+
+价值: 展示了如何在 Economy 2.0 版本下，不按常理出牌地度过极度贫穷的前期。核心操作是“开局 Milestone 0 的特化工业拉满”和“地热/风电出口”。
+
+视频 3: How to Ensure Your City Survives the Economy 2.0 Patch (2024-06-24)
+
+作者: City Planner Plays
+
+价值: 揭示了 Economy 2.0 引入的致命机制——Tile Upkeep (地块维护费)。这是导致很多自动扩张型 AI 破产的根源。
+
+2. EXPERT_TIMELINES (100k 速通关键时间线)
+以 Erdgeist 的 100k WR 录像为例（时间为现实录制时间，全程 3 倍速模拟）：
+
+00:00 (0 人口): 游戏开始。不立刻建城，先进行大面积纯平 Terraform，铺设极其便宜的泥路 (Gravel roads) 网格。
+
+01:00 (~1k 人口): 达到 Milestone 1 (Tiny Village)。立刻建设所有解锁的特殊建筑（Signature Buildings），不是为了用，而是为了白嫖大量 XP。
+
+07:20 (~2k 人口): 达到 Milestone 4 (Grand Village)。转折点发生。解锁了 Office 和火车 (Trains)。玩家立刻向外买地，建立一个连接地图外部的小型火车站，并围绕火车站建新网格。
+
+11:00 (10k 人口): 通过火车迁入，人口迎来第一波爆发。建造大量风力发电机卖电赚钱。
+
+19:00 (20k 人口): 达到 Milestone 8 (Big Town)。质变点。解锁高密住宅（High Density）。玩家彻底放弃铺设低密，转移到铁路另一侧，买下大片地，整体拉平，一次性画出巨大规模的高密网格。
+
+30:00+ (50k 人口): 财政达到每月 +600万 的纯利润。发现人口增长停滞，原因是单条外部火车线路满载 (100% filled)，迁入人口被物理卡死。立刻在地图边缘再建一个新火车站和独立的外部连接。
+
+60:00 (90k 人口): 为了冲刺最后 1 万人口，将住宅税率拉到最低（最高补贴），同时狂降办公区税率创造就业。
+
+64:28 (100k 人口): 完成 10 万人口里程碑。
+
+3. CROSS_VIDEO_PATTERNS (高手跨视频共性模式)
+XP 提款机 (Milestone Rush): 高手绝对不会被动等待人口增长来解锁里程碑。他们会在 Milestone 1 和 2 解锁时，立刻拍下所有能建的特殊建筑（Signature Buildings / Special Buildings）。这能提供海量 XP，让城市在低人口状态下强行解锁高密度和高级基建。
+
+能源出口兜底 (Energy Export Base): 在 Economy 2.0 中，依靠早期税收极难盈利。Ruftickle 和 Erdgeist 的共同选择是：尽早攒钱拍下大型风电阵列或地热发电厂（Geothermal），连接到外部电网（External Connection）。靠卖电产生每月几万到几十万的净利润，从而支撑后续的基建扩张。
+
+极端的地块保守主义 (Tile Conservatism): Economy 2.0 增加了按地块收取的 Tile Upkeep 费用。高手绝不会“为了好看或者预留空间”提前买地。买地的唯一时刻，就是挖掘机进场、马上要填满高密区的前一秒。
+
+交通层级的降维打击: 高手不治堵，他们直接消灭私家车迁入。只要依赖高速公路，车辆寻路和堵车就会卡死游戏引擎的 Simulation Speed，并限制每分钟迁入人数。
+
+4. DENSITY_TRANSITION_FINDINGS (密度转换的底层逻辑)
+为什么高手不会永久铺低密？
+低密度在 Economy 2.0 中是“财政毒药”。它占用的 Tile 极多（带来高昂的 Tile Upkeep），铺设的道路极长（Road Maintenance），但提供的税基极少，且占用游戏空间引发交通拥堵。
+
+何时、为何切换？
+
+第一次切换 (MS 1/2): Ruftickle 利用特殊建筑 XP 强冲 Milestone 2，直接跳过低密，开始铺设 Medium Row Housing（特别是利用欧洲/中国风格的资产，因为占地更小，塞的人更多）。
+
+第二次切换 (MS 8): Erdgeist 在解锁 High Density 时，完全停止了对旧低密区的扩建。
+
+是否主动重划 (Rezone)?：很少！ 高手几乎不拆除旧的低密区去原地升级高密，因为高密区对地价、平整度、服务有瞬间爆发的要求。他们的做法是“飞地式扩张”——在铁路线的另一端或者空旷地带，重新购买地块，大面积 Terraform，直接凭空拉起一座高密度新城，并通过火车与老工业区相连。
+
+5. CAPITAL_AND_EXPANSION_SCALING (资本与扩张的梯度)
+你的 AI Mayor 目前“增长像固定批量的线性加法”，这不符合高手逻辑。高手呈现极强的阶梯式吞吐量提升：
+
+阶段 1 (求生期 0~MS 4): 极小批量。Gravel roads，零星的商业，拉满所有 Milestone 0 解锁的特化工业 (Specialized Industry)（如畜牧、谷物、石头，这些成本极低但利润高）。
+
+阶段 2 (资本积累 MS 4~MS 8): 中等批量。通过卖电和 Office 区实现现金流转正，开始积攒数百万现金。
+
+阶段 3 (资本爆发 MS 8+): 超大批量。手里握着几百万甚至上千万，扩张不再是“划几个格子”，而是暂停游戏，购买 4-5 个 Tile，铲平一座山，铺设 50x50 的高密路网，全铺满，放下一个火车站，然后解除暂停。
+
+6. SERVICES_AND_CITY_PROBLEM_HANDLING (问题处理与优先级)
+高手对待城市 warning 的态度极其功利，分为三类：
+
+直接无视/物理降本 (Ignore / Exploit):
+
+垃圾/污水: Erdgeist 发现污水处理厂太贵，直接在地上用 Terraform 挖了一个巨大的坑（Poop Hole），把排污管扔进去，形成人工粪水湖，省下巨额开销。
+
+死亡: 极早解锁火葬场 (Crematorium) 并只建这个，无视墓地，因为墓地满了需要微操排空。
+
+只建“无路”高配版 (Bypass Traffic):
+
+医疗: 有钱之后，直接建带有直升机停机坪的医院。甚至不需要和新扩建的住宅区修路相连，直升机直接飞过去救人，完全不占用道路资源，无视堵车。
+
+必须立即解决的“真瓶颈”:
+
+外部连接饱和 (Outside Connection Cap): 当火车 100% 满载，意味着外部迁入人口达到了该通道的物理极限。这是限制 time-to-100k 的唯一真凶。高手会立刻开辟第二、第三个直接连接地图边缘的外部通道。
+
+7. ROAD_AND_INFRASTRUCTURE_STRATEGY (道路与基建)
+Road Hierarchy 是个谎言 (在冲刺期): 高手在追求极致人口时，并不严格遵循传统的“主干道-次干道-小路”的完美树状网格。
+
+铁路定都: 骨干网不是高速公路，而是铁路。Erdgeist 明确指出：“Most of the remaining 95,000 inhabitants will now be coming by train instead of cars.” 铁路可以直接将巨量人口从地图外“空投”到市中心的高密区，规避了所有的高速路口堵塞。
+
+微观道路: 前期用最便宜的泥路 (Gravel)。因为 Economy 2.0 中道路维护费是痛点。
+
+8. TOP 15 HIGH-LEVERAGE BEHAVIORS (最高杠杆行为清单)
+按对 “Time-to-100k” 贡献度排序：
+
+火车截流法 (Train Move-in Exploit): 尽早解锁火车并在地图边缘接客，绕过汽车寻路限制，极大提升引擎每分钟模拟迁入量。
+
+XP 白嫖法 (Signature XP Cheese): 一解锁特殊建筑立刻全部拍下，无视其实际功能，纯为拿 XP 强行加速 Milestone 等级。
+
+MS 0 特化工业拉满: 在不占用财政预算的前提下，极大拉高中期前的税基。
+
+国家电网 (Energy Exporting): 靠大规模风电或地热接外部电网，实现早期财政脱贫。
+
+极端地块保守主义: 在动工前 1 秒才买 Tile，绝对不留“闲置缓冲地带”。
+
+飞地高密法 (Leapfrog High-Density): 不在老城区纠结，直接在远处平地起全新高密区。
+
+粪水天坑 (Poop Hole Terraforming): 用地形改造代替昂贵的排污基建。
+
+直升机医疗: 无视道路网络连通性，依靠直升机解决全图危机。
+
+多节点外部连接: 发现单条火车满载后，立刻增开全新的物理外部连接点。
+
+断崖式弃用低密: 达到 MS 8 后，在代码/操作层面上彻底拉黑低密住宅。
+
+就业反向刺激: 后期（90k左右）遇到瓶颈时，狂降 Office 税率，强行制造岗位空缺来吸引移民。
+
+体育公园催熟 (Sports Parks Level-up): 在新建的高密区直接砸下高级公园，瞬间拉升地价，促使高密建筑快速入驻升级。
+
+无产阶级开局: 道路只用最便宜的 Gravel Road，最大化节约维护费。
+
+停顿式大建: 中后期积累资金后，暂停游戏进行大规模宏观 zoning，而不是一边跑时间一边一块一块画。
+
+保持 3 倍速纯净度: 杜绝复杂的立交桥和私家车潮，减轻 CPU 负担，保持 Simulation Speed 不掉。
+
+9. CONTRADICTIONS / UNCERTAINTIES (冲突与不确定性)
+税率调节的真实有效性:
+
+冲突: Erdgeist 在最后冲刺阶段将住宅税率调到最低（最高补贴），但他自己在视频中承认 "Sadly this did not have the effect I expected"。说明在当前版本，单纯补贴住宅并不能凭空变出人口，人口迁入受限于“可用工作”和“交通带宽”。最终他通过补贴 Office 创造海量空缺岗位才拉动了人口。
+
+版本代差 (Eco 2.0 的杀伤力):
+
+早期版本（如 Kibitz 的 100万人口挑战）可以肆意买地和铺路，但在 Economy 2.0 下，Tile Upkeep (地块维护费) 和调整过的服务人员薪资会瞬间摧毁你的财政。你必须按照 City Planner Plays 提示的那样，严格控制所占有 Tile 的数量。
+
+10. AI_MAYOR_IMPLICATIONS (当前你的 AI 究竟做错了什么？)
+如果我是帮你进行 Code Review 的架构师，基于视频事实，你的 AI Mayor 目前在策略层（Gameplay/Agent Prompt）存在以下致命缺陷：
+
+“见地就买，见缝插针” (Tile Bankruptcy Risk)
+
+AI 现状: 随人口增加线性买地、线性扩建低密。
+
+应有逻辑: AI 必须监控当前所拥有的可用 Tile 面积。在 Milestone 8 之前，严禁购买超出绝对必需范围的 Tile。
+
+受制于“需求条” (Demand Bar Slave)
+
+AI 现状: 约 1 万人口时仍在大量铺低密（因为低密需求条总是满的）。
+
+应有逻辑: 需求条是陷阱。一旦解锁 Row Housing / Medium Density，AI 应该在权重层强行压制低密 Zoning 指令。宁可让低密需求条爆满，也要强迫系统刷新中/高密需求。
+
+XP 获取过于被动 (Passive Milestone Progression)
+
+AI 现状: 靠铺路建房慢慢熬经验。
+
+应有逻辑: 建立一个 Milestone_Rush_Routine：一旦检测到库存中有可用的大型 Signature Building 或特殊建筑，且资金允许，立刻找空地拍下（甚至可以放在角落不管）。
+
+基建规模未能与国库挂钩 (Flat Batching)
+
+AI 现状: 有钱没钱，都是一次建一个小区。
+
+应有逻辑: AI 的 Expansion_Batch_Size 参数必须与 Monthly_Profit 挂钩。当纯利 > 100k 时，AI 应该触发 Mega_Project_Mode，暂停游戏引擎，一次性规划数个街区的高密度网格，并配齐火车节点。
+
+只会修路，不会修“通道” (Traffic Bottlenecking)
+
+AI 现状: 道路等级和交通治理偏被动，等堵车了才扩路。
+
+应有逻辑: 堵车不是道路问题，是交通工具问题。AI 必须学会识别 Milestone 4，一旦解锁，优先级最高的操作是从外部连入一条铁路，并围绕它建立 Transit Hub。AI 需要监控外部火车运载率，接近 100% 必须开新线路，这是最硬的物理增长上限。

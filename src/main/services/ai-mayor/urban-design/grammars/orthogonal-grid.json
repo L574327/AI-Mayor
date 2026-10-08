@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "id": "orthogonal-grid",
+  "version": "1.0.0",
+  "identity": [
+    "dominant perpendicular axes",
+    "legible hierarchy",
+    "rectangular blocks"
+  ],
+  "prompt": {
+    "name": "Orthogonal Grid",
+    "summary": "A legible connected grid with bounded block variation and deliberate breaks.",
+    "variation": "Choose orientation and block scale from the site, then vary spacing without losing the grid identity."
+  },
+  "parameters": {
+    "blockWidth": { "min": 48, "max": 160 },
+    "blockDepth": { "min": 64, "max": 220 },
+    "axisJitter": { "min": 0, "max": 0.18 },
+    "greenBreakRatio": { "min": 0.05, "max": 0.24 }
+  },
+  "motifs": [
+    {
+      "id": "aligned-grid",
+      "name": "Aligned Grid",
+      "summary": "Two dominant axes with consistent but non-identical blocks.",
+      "operators": ["parallel-spine", "cross-links"]
+    },
+    {
+      "id": "gateway-grid",
+      "name": "Gateway Grid",
+      "summary": "A grid oriented from an access gateway into the district.",
+      "operators": ["gateway-axis", "parallel-spine", "cross-links"]
+    },
+    {
+      "id": "filtered-grid",
+      "name": "Filtered Grid",
+      "summary": "A grid with bounded green breaks and local interruptions.",
+      "operators": ["filtered-grid", "green-anchor", "cross-links"]
+    }
+  ],
+  "adaptationRules": [
+    {
+      "when": { "roadGeometry": ["grid_like", "mixed"] },
+      "preferMotif": "aligned-grid",
+      "preferOperator": "parallel-spine"
+    },
+    {
+      "when": { "areaClass": ["gateway"] },
+      "preferMotif": "gateway-grid",
+      "preferOperator": "gateway-axis"
+    },
+    {
+      "when": { "slopeProfile": ["steep", "mixed"] },
+      "preferMotif": "filtered-grid",
+      "preferOperator": "filtered-grid"
+    }
+  ],
+  "preferences": {
+    "roadHierarchyCoherence": 0.95,
+    "connectivity": 0.9,
+    "frontageUtilization": 0.85,
+    "terrainFit": 0.55,
+    "shorelineFit": 0.35,
+    "blockScaleFit": 0.9,
+    "blockVariation": 0.65,
+    "deadEndControl": 0.9,
+    "landUseBuffering": 0.55,
+    "greenDistribution": 0.5,
+    "noveltyDistance": 0.7
+  },
+  "antiPatterns": {
+    "maxDeadEndRatio": 0.12,
+    "maxDisconnectedComponents": 0,
+    "maxRepeatedMotifRatio": 0.7,
+    "minTerrainFit": 0.35
+  },
+  "mixing": {
+    "allowInfluenceDimensions": [
+      "block_scale",
+      "density",
+      "commercial",
+      "green",
+      "transit"
+    ]
+  }
+}

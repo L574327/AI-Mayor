@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "id": "garden-neighborhood",
+  "version": "1.0.0",
+  "identity": ["low density", "green anchors", "collector perimeter"],
+  "prompt": {
+    "name": "Garden Neighborhood",
+    "summary": "Low-density local streets grouped around distributed green anchors and clear collectors.",
+    "variation": "Vary cluster size and green-anchor placement while keeping through-traffic on a legible perimeter structure."
+  },
+  "parameters": {
+    "clusterSize": { "min": 3, "max": 9 },
+    "greenAnchorRatio": { "min": 0.16, "max": 0.42 },
+    "localStreetSpacing": { "min": 48, "max": 130 },
+    "culdesacRatio": { "min": 0, "max": 0.2 }
+  },
+  "motifs": [
+    {
+      "id": "green-centered-loop",
+      "name": "Green Centered Loop",
+      "summary": "A local loop organized around a distributed green anchor.",
+      "operators": ["green-anchor", "loop", "cluster"]
+    },
+    {
+      "id": "paired-crescents",
+      "name": "Paired Crescents",
+      "summary": "Two compact crescent clusters linked to a collector.",
+      "operators": ["green-anchor", "loop", "cross-links"]
+    },
+    {
+      "id": "filtered-garden-grid",
+      "name": "Filtered Garden Grid",
+      "summary": "A soft grid with green interruptions and low through-traffic.",
+      "operators": ["filtered-grid", "green-anchor", "cluster"]
+    }
+  ],
+  "adaptationRules": [
+    {
+      "when": { "areaClass": ["infill"] },
+      "preferMotif": "filtered-garden-grid",
+      "preferOperator": "filtered-grid"
+    },
+    {
+      "when": { "areaClass": ["edge", "isolated_pocket"] },
+      "preferMotif": "green-centered-loop",
+      "preferOperator": "green-anchor"
+    },
+    {
+      "when": { "slopeProfile": ["rolling", "mixed"] },
+      "preferMotif": "paired-crescents",
+      "preferOperator": "loop"
+    }
+  ],
+  "preferences": {
+    "roadHierarchyCoherence": 0.86,
+    "connectivity": 0.72,
+    "frontageUtilization": 0.5,
+    "terrainFit": 0.72,
+    "shorelineFit": 0.42,
+    "blockScaleFit": 0.64,
+    "blockVariation": 0.76,
+    "deadEndControl": 0.66,
+    "landUseBuffering": 0.92,
+    "greenDistribution": 1,
+    "noveltyDistance": 0.74
+  },
+  "antiPatterns": {
+    "maxDeadEndRatio": 0.2,
+    "maxDisconnectedComponents": 0,
+    "maxRepeatedMotifRatio": 0.62,
+    "minTerrainFit": 0.5
+  },
+  "mixing": {
+    "allowInfluenceDimensions": [
+      "block_scale",
+      "density",
+      "commercial",
+      "green",
+      "curvature"
+    ]
+  }
+}

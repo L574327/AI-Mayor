@@ -1,0 +1,230 @@
+import { resolve } from "node:path";
+import { defineConfig, type EnvironmentConfig, type RsbuildConfig } from "@rsbuild/core";
+import { pluginReact } from "@rsbuild/plugin-react";
+import { pluginSass } from "@rsbuild/plugin-sass";
+import { config } from "dotenv";
+import { ProductionDependenciesInstallerPlugin } from "./scripts/build/production-dependencies-installer";
+
+const loadEnvironmentFile = () => {
+  const result = config({
+    path: resolve(__dirname, ".env"),
+    override: false,
+    quiet: false,
+  });
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  return result.parsed || {};
+};
+
+export default defineConfig(async ({ command }): Promise<RsbuildConfig> => {
+  const isCommandDev = command === "dev";
+  const isCommandBuild = command === "build";
+
+  const port = 33077;
+  const env = loadEnvironmentFile();
+  const define = Object.entries(env).reduce(
+    (define, [key, val]) => {
+      define[`process.env.${key}`] = JSON.stringify(val);
+      return define;
+    },
+    {} as Record<string, string>,
+  );
+
+  // A release build is a production build whatever .env says (its NODE_ENV=development is for the dev server): minified, no dev paths.
+  if (isCommandBuild) define["process.env.NODE_ENV"] = JSON.stringify("production");
+  define["process.env.RENDERER_DEV_SERVER"] = isCommandDev ? `"http://localhost:${port}/renderer"` : "undefined";
+  define["process.env.SOURCE_ROOT"] = isCommandDev ? `"${__dirname}"` : "undefined";
+
+  const createMainEnvironment = () => {
+    const copy: Array<Record<"from" | "to", string>> = [
+      {
+        from: "build",
+        to: "build",
+      },
+      {
+        from: "drizzle/migrations",
+        to: "migrations",
+      },
+      {
+        from: `node_modules/onnxruntime-node/bin/napi-v3/${process.platform}/${process.arch}`,
+        to: `bin/onnxruntime/${process.platform}/${process.arch}`,
+      },
+    ];
+
+    const externals: string[] = ["better-sqlite3", "@electric-sql/pglite", "sharp"];
+
+    if (process.platform === "win32") {
+      externals.push(`@lancedb/lancedb-win32-${process.arch}-msvc`);
+      externals.push(`@napi-rs/canvas-win32-${process.arch}-msvc`);
+    } else if (process.platform === "linux") {
+      externals.push(`@lancedb/lancedb-linux-${process.arch}-gnu`);
+      externals.push(`@napi-rs/canvas-linux-${process.arch}-gnu`);
+    } else if (process.platform === "darwin") {
+      externals.push(`@lancedb/lancedb-darwin-${process.arch}`);
+      externals.push(`@napi-rs/canvas-darwin-${process.arch}`);
+    }
+
+    const config: EnvironmentConfig = {
+      source: {
+        entry: {
+          main: "./src/main/main.ts",
+          // The AI Mayor engine: a separate process the main process supervises (src/main/services/ai-mayor/host). It runs on the same
+          // executable in node mode and never touches Electron.
+          "mayor-engine": "./src/main/services/ai-mayor/host/mayor-engine.ts",
+        },
+        define,
+      },
+      tools: {
+        rspack: {
+          target: "electron-main",
+          output: {
+            library: {
+              type: "commonjs",
+            },
+            publicPath: "./",
+          },
+          plugins: [
+            new ProductionDependenciesInstallerPlugin({
+              // In dev, Electron resolves dependencies from the repository's
+              // node_modules via output/..; copying/installing another package
+              // tree into output is unnecessary and can prevent nodemon setup
+              // when offline. Production packaging still installs externals.
+              externals: isCommandDev ? [] : externals,
+              dev: isCommandDev,
+              inspect: {
+                port: port + 1,
+              },
+            }),
+          ],
+          externals,
+        },
+        htmlPlugin: false,
+      },
+      output: {
+        target: "node",
+        filename: {
+          js: "[name].cjs",
+        },
+        copy,
+      },
+    };
+
+    return config;
+  };
+
+  const createRendererEnvironment = () => {
+    const config: EnvironmentConfig = {
+      source: {
+        entry: {
+          index: "./src/renderer/index.tsx",
+        },
+        define,
+      },
+      output: {
+        target: "web",
+        distPath: {
+          root: "output/renderer",
+        },
+      },
+      tools: {
+        rspack: {
+          output: {
+            publicPath: isCommandBuild ? "./" : undefined,
+          },
+        },
+        htmlPlugin: {
+          title: "AI Mayor",
+        },
+      },
+      dev: {
+        writeToDisk: true,
+      },
+      plugins: [pluginReact(), pluginSass()],
+    };
+
+    return config;
+  };
+
+  const createPreloadEnvironment = () => {
+    const config: EnvironmentConfig = {
+      source: {
+        entry: {
+          preload: "./src/main/preload.ts",
+        },
+        define,
+      },
+      tools: {
+        rspack: {
+          target: "electron-preload",
+          output: {
+            library: {
+              type: "module",
+            },
+          },
+        },
+        htmlPlugin: false,
+      },
+      output: {
+        target: "node",
+        filename: {
+          js: "[name].js",
+        },
+      },
+      dev: {
+        writeToDisk: true,
+      },
+    };
+
+    return config;
+  };
+
+  return {
+    mode: isCommandBuild ? "production" : "development",
+    environments: {
+      main: createMainEnvironment(),
+      renderer: createRendererEnvironment(),
+      preload: createPreloadEnvironment(),
+    },
+    server: {
+      port: port,
+    },
+    resolve: {
+      alias: {
+        "@": resolve(__dirname, "src"),
+        utils: resolve(__dirname, "src/utils"),
+      },
+    },
+    dev: {
+      writeToDisk: true,
+    },
+    output: {
+      distPath: {
+        root: "output",
+      },
+      cleanDistPath: true,
+      // A release build ships no source: names mangled, comments dropped, and no source maps beside the bundles.
+      sourceMap: isCommandBuild ? false : undefined,
+      minify: isCommandBuild,
+    },
+    tools: {
+      rspack: {
+        ignoreWarnings: [
+          (error) => {
+            if (error.message?.includes("/node_modules/") || error.message?.includes("\\node_modules\\")) {
+              return true;
+            }
+
+            if (error.message?.includes("Critical dependency")) {
+              return true;
+            }
+
+            return false;
+          },
+        ],
+      },
+    },
+  };
+});

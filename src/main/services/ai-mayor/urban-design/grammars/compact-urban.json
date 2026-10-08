@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "id": "compact-urban",
+  "version": "1.0.0",
+  "identity": ["fine grain blocks", "strong center", "mixed active edges"],
+  "prompt": {
+    "name": "Compact Urban",
+    "summary": "Fine-grained connected blocks with a strong center and a density gradient toward the edge.",
+    "variation": "Vary the civic node, market spine, and perimeter-block balance while preserving compact connectivity."
+  },
+  "parameters": {
+    "blockWidth": { "min": 32, "max": 96 },
+    "blockDepth": { "min": 48, "max": 140 },
+    "centerIntensity": { "min": 0.55, "max": 1 },
+    "greenPocketRatio": { "min": 0.04, "max": 0.2 }
+  },
+  "motifs": [
+    {
+      "id": "civic-square-frame",
+      "name": "Civic Square Frame",
+      "summary": "Fine blocks framing a connected civic or market node.",
+      "operators": ["civic-node", "perimeter-block", "cross-links"]
+    },
+    {
+      "id": "market-spine",
+      "name": "Market Spine",
+      "summary": "A compact active spine with fine-grain side blocks.",
+      "operators": ["gateway-axis", "perimeter-block", "cross-links"]
+    },
+    {
+      "id": "perimeter-infill",
+      "name": "Perimeter Infill",
+      "summary": "Connected compact infill that transitions toward nearby districts.",
+      "operators": ["perimeter-block", "parallel-spine", "green-anchor"]
+    }
+  ],
+  "adaptationRules": [
+    {
+      "when": { "areaClass": ["gateway", "waterfront"] },
+      "preferMotif": "market-spine",
+      "preferOperator": "gateway-axis"
+    },
+    {
+      "when": { "roadGeometry": ["grid_like", "mixed"] },
+      "preferMotif": "perimeter-infill",
+      "preferOperator": "perimeter-block"
+    },
+    {
+      "when": { "areaClass": ["infill"] },
+      "preferMotif": "civic-square-frame",
+      "preferOperator": "civic-node"
+    }
+  ],
+  "preferences": {
+    "roadHierarchyCoherence": 0.9,
+    "connectivity": 0.98,
+    "frontageUtilization": 0.92,
+    "terrainFit": 0.58,
+    "shorelineFit": 0.62,
+    "blockScaleFit": 0.9,
+    "blockVariation": 0.72,
+    "deadEndControl": 0.96,
+    "landUseBuffering": 0.7,
+    "greenDistribution": 0.68,
+    "noveltyDistance": 0.78
+  },
+  "antiPatterns": {
+    "maxDeadEndRatio": 0.06,
+    "maxDisconnectedComponents": 0,
+    "maxRepeatedMotifRatio": 0.65,
+    "minTerrainFit": 0.35
+  },
+  "mixing": {
+    "allowInfluenceDimensions": [
+      "block_scale",
+      "density",
+      "commercial",
+      "green",
+      "transit"
+    ]
+  }
+}

@@ -1,0 +1,39 @@
+.app-sidebar{
+  height:100vh;
+
+  --tw-bg-opacity:1;
+
+  overflow-x: hidden;
+  background: rgba(var(--color-bg-sidebar),var(--tw-bg-opacity));
+}
+
+.darwin.app-sidebar {
+  --tw-bg-opacity:1;
+  --tw-border-opacity:1;
+
+  background: rgba(var(--color-bg-sidebar),var(--tw-bg-opacity));
+  border-right:1px solid rgba(var(--color-border),var(--tw-border-opacity));
+}
+
+@media screen and (width >= 768px) {
+  .darwin.app-sidebar {
+    border-right: none;
+    background: transparent;;
+  }
+}
+
+.Canny_BadgeContainer .Canny_Badge {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  border-radius: 10px;
+  background-color: red;
+  padding: 5px;
+  border: 1px solid white;
+}
+
+.scrollbar-hide {
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}

@@ -1,0 +1,56 @@
+/** override fluent css to fix some issues*/
+.fui-MenuButton__menuIcon {
+  margin-top: -5px !important;
+}
+
+.fui-MenuDivider {
+  border-width: 0.5px !important;
+  --tw-border-opacity: 0.5;
+  border-color: rgba(var(--color-border), var(--tw-border-opacity)) !important;
+}
+.fui-Listbox {
+  max-height: 360px !important;
+}
+.fui-Label {
+  font-family: var(--fontFamilyBase);
+}
+.field-small .fui-Label {
+  font-size: var(--fontSizeBase200);
+}
+.toast-content {
+  overflow-wrap: break-word;
+  /* Instead use this non-standard one: */
+  word-break: break-word;
+  white-space: pre-wrap !important; /* css-3 */
+  word-wrap: break-word !important;
+  flex-wrap: wrap !important;
+  line-height: 1.5 !important;
+  -ms-hyphens: auto;
+  -moz-hyphens: auto;
+  -webkit-hyphens: auto;
+  hyphens: auto;
+}
+
+.fui-PopoverSurface {
+  max-width: 400px;
+}
+.fui-Field__validationMessage{
+  @apply flex justify-start items-start;
+}
+.fui-AccordionHeader__button {
+  --fontFamilyBase:
+    Barlow, -apple-system, BlinkMacSystemFont, PingFang SC, Hiragino Sans GB,
+    Roboto, helvetica neue, helvetica, segoe ui, Arial, sans-serif !important;
+}
+.collapsed .fui-AccordionHeader__button {
+  padding: 0 18px !important;
+}
+.collapsed .fui-AccordionHeader__button > span {
+  padding-right: 0 !important;
+}
+.chat-nav button.fui-AccordionHeader__button {
+  min-height: 32px !important;
+}
+.provider-form .fui-Checkbox__indicator {
+  margin: 4px !important;
+}

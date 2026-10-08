@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "id": "terrain-organic",
+  "version": "1.0.0",
+  "identity": ["contour following", "irregular blocks", "few clear connectors"],
+  "prompt": {
+    "name": "Terrain Following Organic",
+    "summary": "An irregular connected network that follows contours and preserves feasible natural edges.",
+    "variation": "Let slope and obstacles choose the bend and branch pattern while keeping a small number of legible connectors."
+  },
+  "parameters": {
+    "curvature": { "min": 0.12, "max": 0.7 },
+    "branchCadence": { "min": 70, "max": 220 },
+    "loopRatio": { "min": 0.1, "max": 0.55 },
+    "greenEdgeRatio": { "min": 0.1, "max": 0.4 }
+  },
+  "motifs": [
+    {
+      "id": "contour-web",
+      "name": "Contour Web",
+      "summary": "Contour-aligned streets with sparse cross-links.",
+      "operators": ["contour-path", "cross-links", "branch"]
+    },
+    {
+      "id": "branching-crescent",
+      "name": "Branching Crescent",
+      "summary": "Curved connected branches around feasible terrain pockets.",
+      "operators": ["contour-path", "branch", "loop"]
+    },
+    {
+      "id": "saddle-connector",
+      "name": "Saddle Connector",
+      "summary": "A strong connector through a feasible low-slope passage.",
+      "operators": ["contour-path", "gateway-axis", "cross-links"]
+    }
+  ],
+  "adaptationRules": [
+    {
+      "when": { "slopeProfile": ["rolling", "steep", "mixed"] },
+      "preferMotif": "contour-web",
+      "preferOperator": "contour-path"
+    },
+    {
+      "when": { "areaClass": ["edge", "isolated_pocket"] },
+      "preferMotif": "branching-crescent",
+      "preferOperator": "branch"
+    },
+    {
+      "when": { "slopeProfile": ["flat"] },
+      "preferMotif": "saddle-connector",
+      "preferOperator": "cross-links"
+    }
+  ],
+  "preferences": {
+    "roadHierarchyCoherence": 0.7,
+    "connectivity": 0.78,
+    "frontageUtilization": 0.58,
+    "terrainFit": 1,
+    "shorelineFit": 0.65,
+    "blockScaleFit": 0.65,
+    "blockVariation": 0.95,
+    "deadEndControl": 0.7,
+    "landUseBuffering": 0.65,
+    "greenDistribution": 0.78,
+    "noveltyDistance": 0.9
+  },
+  "antiPatterns": {
+    "maxDeadEndRatio": 0.2,
+    "maxDisconnectedComponents": 0,
+    "maxRepeatedMotifRatio": 0.55,
+    "minTerrainFit": 0.7
+  },
+  "mixing": {
+    "allowInfluenceDimensions": [
+      "block_scale",
+      "density",
+      "commercial",
+      "green",
+      "curvature"
+    ]
+  }
+}

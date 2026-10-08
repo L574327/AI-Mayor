@@ -1,0 +1,478 @@
+/*
+ * @NOTE: Prepend a `~` to css file paths that are in your node_modules
+ *        See https://github.com/webpack-contrib/sass-loader#imports
+ */
+
+@use 'sass:meta';
+@import url(./variables.scss);
+
+@import "tailwindcss";
+
+[data-theme='light'] {
+  @include meta.load-css('highlight.js/styles/atom-one-light');
+}
+[data-theme='dark'] {
+  @include meta.load-css('highlight.js/styles/atom-one-dark');
+}
+
+@font-face {
+  font-family: 'Barlow';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(../assets/fonts/barlow400.woff2) format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(../assets/fonts/JetBrainsMono.woff2) format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-text-size-adjust: 100%;
+  -ms-text-size-adjust: 100%;
+  font-variant-ligatures: none;
+  -webkit-font-variant-ligatures: none;
+  text-rendering: optimizeLegibility;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-font-smoothing: antialiased;
+  font-weight: normal;
+  font-family:
+    Barlow,
+    -apple-system,
+    BlinkMacSystemFont,
+    PingFang SC,
+    Hiragino Sans GB,
+    Roboto,
+    helvetica neue,
+    helvetica,
+    segoe ui,
+    Arial,
+    sans-serif;
+}
+body {
+  position: relative;
+  height: 100vh;
+  overflow-x: hidden;
+  overflow-y: hidden;
+  -webkit-font-smoothing: antialiased;
+  background: transparent;
+}
+pre,code{
+  word-break: break-all;
+}
+code,
+code * {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+code,
+kbd,
+samp,
+pre {
+  font-size: 12px;
+  max-width: 768px;
+  min-width: 200px;
+}
+ol,
+ul {
+  margin-left: 25px;
+}
+ol > li {
+  list-style-type: decimal;
+}
+
+ul > li {
+  list-style-type: disc;
+}
+
+a {
+  /** use default rather than pointer makes it looks like a native app*/
+  cursor: default !important;
+}
+
+pre {
+  padding: 13px 24px 8px 13px;
+  border-radius: 4px;
+  --tw-bg-opacity: 1;
+  background-color: rgba(var(--color-bg-surface-2), var(--tw-bg-opacity));
+  line-height: 1.7;
+  overflow-x: auto;
+  @extend .wrap;
+}
+.message pre {
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+.message code{
+  @apply break-all;
+}
+pre.ghost,
+.ghost pre {
+  background-color: transparent !important;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+svg {
+  outline: none;
+}
+button {
+  /** use default rather than pointer makes it looks like a native app*/
+  cursor: default !important;
+  outline: none !important;
+}
+button:focus {
+  outline: 0 !important;
+  appearance: none;
+}
+
+.file-button {
+  font-family: Barlow;
+  padding: 0.2em 0.4em;
+}
+.file-button::file-selector-button {
+  font-family: Barlow !important;
+  padding: 5px 12px;
+  margin-right: 10px;
+}
+
+textarea.fluent {
+  padding-bottom: var(--spacingVerticalSNudge);
+  padding-top: var(--spacingVerticalSNudge);
+  padding-right: calc(
+    var(--spacingHorizontalMNudge) + var(--spacingHorizontalXXS)
+  );
+  padding-left: calc(
+    var(--spacingHorizontalMNudge) + var(--spacingHorizontalXXS)
+  );
+  padding-bottom: var(--strokeWidthThick);
+  border-color: var(--colorNeutralStroke1);
+  border-bottom-color: var(--colorNeutralStrokeAccessible);
+  border-width: var(--strokeWidthThin);
+  border-radius: var(--borderRadiusMedium);
+  outline-style: none;
+  background-color: var(--colorNeutralBackground1);
+}
+
+button {
+  -webkit-app-region: no-drag;
+}
+
+main {
+  --tw-bg-opacity: 1;
+  background-color: rgba(var(--color-bg-surface-1), var(--tw-bg-opacity));
+}
+
+@media screen and (width >= 768px) {
+  main.darwin {
+    --tw-border-opacity:1;
+    box-shadow: -0.3px 0 0 rgba(var(--color-darwin-border),var(--tw-border-opacity));
+  }
+}
+
+
+.traffic-lights {
+  position: absolute;
+  z-index: 999;
+  top: 5px;
+  left: 15px;
+  display: flex;
+  gap: 1px;
+  justify-content: flex-start;
+  align-items: center;
+}
+
+.tips {
+  --tw-text-opacity: 1;
+  line-height: 1.4;
+  color: rgba(var(--color-text-secondary), var(--tw-text-opacity));
+  opacity: 0.6;
+}
+
+.number {
+  font-variant-numeric: tabular-nums;
+}
+.wrap {
+  white-space: pre-wrap; /* css-3 */
+  white-space: -moz-pre-wrap; /* Mozilla, since 1999 */
+  white-space: -o-pre-wrap; /* Opera 7 */
+  word-wrap: break-word;
+  flex-wrap: wrap;
+}
+.button {
+  cursor: default !important;
+  outline: none !important;
+  align-items: center;
+  box-sizing: border-box;
+  display: inline-flex;
+  justify-content: center;
+  text-decoration-line: none;
+  vertical-align: middle;
+  margin: 0px;
+  overflow: hidden;
+  background-color: var(--colorNeutralBackground1);
+  color: var(--colorNeutralForeground1);
+  border: var(--strokeWidthThin) solid var(--colorNeutralStroke1);
+  font-family: var(--fontFamilyBase);
+  outline-style: none;
+  padding: 5px var(--spacingHorizontalM);
+  min-width: 96px;
+  border-radius: var(--borderRadiusMedium);
+  font-size: var(--fontSizeBase300);
+  font-weight: var(--fontWeightSemibold);
+  line-height: var(--lineHeightBase300);
+  transition-duration: var(--durationFaster);
+  transition-property: background, border, color;
+  transition-timing-function: var(--curveEasyEase);
+}
+.button.primary {
+  background-color: var(--colorBrandBackground);
+  color: var(--colorNeutralForegroundOnBrand);
+  border-color: transparent;
+}
+
+.border-base {
+  --tw-border-opacity: 1;
+  border-color: rgba(var(--color-border), var(--tw-border-opacity));
+}
+.darwin.border-base {
+  --tw-border-opacity: 0.3;
+  border-color: rgba(var(--color-darwin-border), var(--tw-border-opacity));
+}
+
+.border-secondary {
+  --tw-border-opacity: 1;
+  border-color: rgba(var(--color-border-secondary), var(--tw-border-opacity))!important;
+}
+
+
+.text-color-secondary {
+  --tw-text-opacity: 1;
+  color: rgba(var(--color-text-secondary), var(--tw-text-opacity)) !important;
+}
+
+.text-color-tertiary {
+  --tw-text-opacity: 0.5;
+  color: rgba(var(--color-text-secondary), var(--tw-text-opacity)) !important;
+}
+
+.text-color-success {
+  --tw-text-opacity: 1;
+  color: rgba(var(--color-text-success), var(--tw-text-opacity)) !important;
+}
+
+.text-color-warning {
+  --tw-text-opacity: 1;
+  color: rgba(var(--color-text-warning), var(--tw-text-opacity)) !important;
+}
+
+.text-color-danger {
+  --tw-text-opacity: 1;
+  color: rgba(var(--color-text-danger), var(--tw-text-opacity)) !important;
+}
+
+.bg-brand-surface-1 {
+  --tw-bg-opacity: 1;
+  background-color: rgba(var(--color-bg-surface-1), var(--tw-bg-opacity));
+}
+
+.bg-brand-surface-2 {
+  --tw-bg-opacity: 1;
+  background-color: rgba(var(--color-bg-surface-2), var(--tw-bg-opacity));
+}
+
+.bg-brand-surface-3 {
+  --tw-bg-opacity: 1;
+  background-color: rgba(var(--color-bg-surface-3), var(--tw-bg-opacity));
+}
+.bg-sidebar{
+  --tw-bg-opacity: 1;
+  background-color: rgba(var(--color-bg-sidebar),var(--tw-bg-opacity));
+}
+
+.justify-start {
+  justify-content: flex-start !important;
+}
+
+.min-w-0 {
+  min-width: 0 !important;
+}
+
+#app{
+  border-radius: 20px;
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.25);
+}
+
+.page {
+  padding-bottom: 50px;
+}
+.page-top-bar {
+  -webkit-app-region: drag;
+  height: 20px;
+  margin-bottom: 10px;
+}
+.page-header {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+#page-settings input,
+#page-settings button,
+#page-settings fui-Option * {
+  font-family: Barlow;
+}
+
+.latin {
+  font-family: Barlow;
+}
+.separator{
+  @apply text-neutral-400;
+  font-weight: bold;
+}
+[data-theme='dark'] .separator {
+  @apply text-neutral-600;
+}
+.skeleton-box {
+  display: inline-block;
+  height: 1em;
+  position: relative;
+  overflow: hidden;
+  background-color: rgb(var(--color-bg-surface-3));
+
+  &::after {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    transform: translateX(-100%);
+    background-image: linear-gradient(
+      90deg,
+      rgba(var(--color-bg-surface-1), 0) 0,
+      rgba(var(--color-bg-surface-1), 0.2) 20%,
+      rgba(var(--color-bg-surface-1), 0.5) 60%,
+      rgba(var(--color-bg-surface-1), 0)
+    );
+    animation: shimmer 2s infinite;
+    content: '';
+  }
+
+  @keyframes shimmer {
+    100% {
+      transform: translateX(100%);
+    }
+  }
+}
+
+.tag-model {
+  font-size: 12px;
+  line-height: 24px;
+  vertical-align: middle;
+}
+
+.tag-variable {
+  background-color: rgba(212, 197, 249, 0.18);
+  font-size: 14px;
+  vertical-align: middle;
+  line-height: normal;
+  display: inline-block;
+  @apply rounded;
+}
+
+mark {
+  opacity: 0.6;
+  font-weight: inherit;
+}
+
+@media (prefers-color-scheme: dark) {
+  .tag-model {
+    color: rgba(160, 238, 238, 1);
+  }
+  .tag-variable {
+    color: rgb(210, 195, 249);
+  }
+  mark {
+    color: rgb(20, 20, 20);
+  }
+  .img-dark-compatible {
+    filter: invert(50%);
+  }
+  .svg-icon {
+    color: #eee;
+    stroke: #eee;
+  }
+}
+
+@media (prefers-color-scheme: light) {
+  .tag-model {
+    color: rgba(43, 192, 142, 1);
+  }
+  .tag-variable {
+    color: rgb(20, 20, 20);
+  }
+  .svg-icon {
+    color: #171717;
+    stroke: #171717;
+  }
+}
+
+.font-lg {
+  font-size: 16px;
+  * {
+    font-size: 16px;
+  }
+  p,ul,li{
+    line-height: 1.8;
+  }
+  button,span,div{
+    font-size: 16px!important;
+  }
+  code,pre {
+    font-size: 14px!important;
+    * {
+      font-size: 14px!important;
+    }
+  }
+}
+
+.font-xl {
+  font-size: 18px;
+  * {
+    font-size: 18px;
+    line-height: 1.4;
+  }
+  button,span,.fui-MenuItem__content{
+    font-size: 18px;
+  }
+  p,ul,li{
+    line-height: 2;
+  }
+  code,
+  pre {
+    font-size: 16px!important;
+
+    * {
+      font-size: 16px!important;
+    }
+  }
+}
+
+.app-region-drag {
+  -webkit-app-region: drag;
+}
+
+.app-region-no-drag {
+  -webkit-app-region: no-drag;
+}
