@@ -10,7 +10,7 @@
 https://my-portfolio-six-livid-63.vercel.app/ai-mayor/latest.json
 ```
 
-在你的 Vercel 项目里放一个静态文件 `public/ai-mayor/latest.json` 即可。要换地址，改 `src/main/services/ai-mayor/host/update-check.ts` 里的 `DEFAULT_MANIFEST_URL`（也可以用环境变量 `AI_MAYOR_UPDATE_URL` 临时覆盖）。
+网站项目里不用手写这个文件：`src/app/ai-mayor/latest.json/route.ts` 读 `src/content/releases.ts` 生成，下载页、产品页、更新源三处同源。要换地址，改 `src/main/services/ai-mayor/host/update-check.ts` 里的 `DEFAULT_MANIFEST_URL`（也可以用环境变量 `AI_MAYOR_UPDATE_URL` 临时覆盖）。
 
 ## 文件内容
 
@@ -56,7 +56,7 @@ https://my-portfolio-six-livid-63.vercel.app/ai-mayor/latest.json
 
 1. 用 `npm run package` 打出 `AI-Mayor-Setup-<版本>.exe`。
 2. 算 SHA-256，把安装包放到网站上。
-3. 改 `latest.json` 的 `version`、`downloadUrl`、`sha256`、`notes`。
+3. 改网站项目 `src/content/releases.ts` 的 `version`、`date`、`notes`、`downloadUrl`、`sha256`、`sizeBytes`（`latest.json` 自动生成）。
 4. 部署。老用户下次启动（或点检查更新）就会看到。
 
 先传安装包、**最后**才改 `latest.json`，避免玩家点到还没传好的文件。
