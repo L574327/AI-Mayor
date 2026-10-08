@@ -247,16 +247,58 @@ export const MINIMUM_POPULATION_FOR_RATES = 100;
 
 export interface Constraint { limit: number; binding: "capital" | "absorption" | "seed" | "none"; capitalArea: number; absorptionArea: number | null; detail: string }
 
-/** The reserve a batch must leave in the treasury. */
-export function capitalReserve(monthlyMaintenance: number | null): number {
-  return Math.max(DEVIATION_RESERVE, (monthlyMaintenance ?? 0) * RESERVE_SHARE_OF_MONTHLY_MAINTENANCE);
+/**
+ * Cash kept above the spending fuse's floor for the small writes that keep the city working: the road to a service that was just placed, a dead end
+ * closed, a power line joined. Districts are laid only above floor + this band, so the repairs never meet the fuse. Live 2026-10-08: ten districts
+ * took the treasury from 1,000,000 down to the fuse's floor in 17 minutes; the cemetery placed after that never got its 50 m road (refused by the fuse)
+ * and every cemetery was then held for 7 game days while hearse icons piled up.
+ */
+export const OPERATING_RESERVE_MINIMUM = 50_000;
+export const OPERATING_RESERVE_SHARE_OF_FLOOR = 0.2;
+export function operatingReserve(spendFloor: number | null | undefined): number {
+  return Math.max(OPERATING_RESERVE_MINIMUM, (spendFloor ?? 0) * OPERATING_RESERVE_SHARE_OF_FLOOR);
 }
 
-/** Square metres of district the cash can pay for: cash above the reserve, plus a month of surplus, at the measured cost per square metre. */
-export function capitalAreaCap(input: { treasury: number; monthlyBalance: number; monthlyMaintenance: number | null }): number {
-  const budget = Math.max(0, input.treasury - capitalReserve(input.monthlyMaintenance)) * CAPITAL_SHARE_OF_CASH
+/**
+ * The reserve a batch must leave in the treasury: never below the spending fuse's floor plus the operating band (`spendFloor`: the fuse's floor and
+ * margin, null when the fuse stands down). A batch priced above the fuse's floor is a batch the fuse refuses half-way — the district's streets laid, its
+ * way in refused, and the game showing the refused street's preview every cycle (live 2026-10-08: 290 refused writes in 30 minutes).
+ */
+export function capitalReserve(monthlyMaintenance: number | null, spendFloor: number | null = null): number {
+  const fuse = spendFloor !== null && spendFloor > 0 ? spendFloor + operatingReserve(spendFloor) : 0;
+  return Math.max(DEVIATION_RESERVE, (monthlyMaintenance ?? 0) * RESERVE_SHARE_OF_MONTHLY_MAINTENANCE, fuse);
+}
+
+/**
+ * Square metres of district the cash can pay for: cash above the reserve, plus a month of surplus, at the measured cost per square metre — and no more
+ * than the spending fuse lets out in one game hour (`hourlyCap`), so a batch is never cut off half-way by the hourly cap either.
+ */
+export function capitalAreaCap(input: { treasury: number; monthlyBalance: number; monthlyMaintenance: number | null; spendFloor?: number | null; hourlyCap?: number | null }): number {
+  const budget = Math.max(0, input.treasury - capitalReserve(input.monthlyMaintenance, input.spendFloor ?? null)) * CAPITAL_SHARE_OF_CASH
     + Math.max(0, input.monthlyBalance) * CAPITAL_SURPLUS_MONTHS;
-  return Math.max(0, budget / COST_PER_SQUARE_METER);
+  const hourly = input.hourlyCap !== undefined && input.hourlyCap !== null && input.hourlyCap > 0 ? input.hourlyCap * CAPITAL_SHARE_OF_CASH : Infinity;
+  return Math.max(0, Math.min(budget, hourly) / COST_PER_SQUARE_METER);
+}
+
+/**
+ * THE TEMPLATE DISTRICT (the player's ruling, 2026-10-08: "split into the most reasonable, healthy districts, then just copy them"). The policy's own
+ * growth lays districts of at most this side — three blocks by three (120/160/120 m), one ring of collector road and small streets inside — one after
+ * another as the city takes them up, instead of one 1,200 x 760 m grid the city needs an hour to fill (live 2026-10-08: ten such districts in ten minutes,
+ * 54,000 zoned cells, 16,700 of them shops and offices that never grew). A player who names a place or a size is not held to it.
+ */
+export const TEMPLATE_DISTRICT_SIDE_METERS = 400;
+export const TEMPLATE_DISTRICT_SQUARE_METERS = TEMPLATE_DISTRICT_SIDE_METERS * TEMPLATE_DISTRICT_SIDE_METERS;
+/** Zoned residential cells of one template district (60% of its ground is lots, 64 m² a cell). */
+export const TEMPLATE_DISTRICT_CELLS = Math.round(TEMPLATE_DISTRICT_SQUARE_METERS * 0.6 / 64);
+/**
+ * Snowball's absorption cap: the empty residential zoning (all densities) the city may hold ahead of its people — about two template districts. A new
+ * district follows as soon as the last ones fill, so the city builds without pause and without zoning that stands empty for an hour. Empty zoning is
+ * not free either: it holds the game's demand down (EmptyBuildings) and its roads cost upkeep from the day they are laid.
+ */
+export const SNOWBALL_PIPELINE_CELLS = 2 * TEMPLATE_DISTRICT_CELLS;
+export function snowballPipelineCells(emptyResidentialCells: number): { cells: number; detail: string } {
+  const cells = Math.max(0, SNOWBALL_PIPELINE_CELLS - emptyResidentialCells);
+  return { cells, detail: `${emptyResidentialCells} homes' cells stand empty of the ${SNOWBALL_PIPELINE_CELLS} the city may hold ahead of its people -> ${Math.round(cells)} cells` };
 }
 
 /**

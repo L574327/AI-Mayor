@@ -393,6 +393,14 @@ export class Renderer extends Stateful<Renderer.State> {
     if (this.#gameBarWindow && !this.#gameBarWindow.isDestroyed()) this.#gameBarWindow.hide();
   }
 
+  /** The windows over the game (the Mayor's button, the subtitle, the old overlay) closed for good: the app is quitting. */
+  closeMayorWindows() {
+    for (const window of [this.#gameBarWindow, this.#subtitleWindow, this.#overlayWindow]) if (window && !window.isDestroyed()) window.destroy();
+    this.#gameBarWindow = null;
+    this.#subtitleWindow = null;
+    this.#overlayWindow = null;
+  }
+
   closeOverlay() {
     if (this.#overlayWindow && !this.#overlayWindow.isDestroyed()) this.#overlayWindow.close();
   }

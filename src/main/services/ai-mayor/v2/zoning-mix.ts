@@ -28,6 +28,10 @@ export interface ZoningMixSignals {
   residentialByDensity?: Record<"low" | "medium" | "high", { zoned: number; empty: number; demand: number | null }>;
 }
 
+/** A shop, office or industrial zoning this empty (and at least this large) is saturated: no more of it is laid until it fills. */
+export const NON_HOUSING_SATURATED_SHARE = 0.5;
+export const SATURATION_MINIMUM_ZONED_CELLS = 300;
+
 /** At most this share of a district's outer faces is given to shops and offices; the rest stays housing. */
 export const RING_SHARE_FOR_NON_HOUSING = 0.85;
 export const emptyMix = (): ZoningMixSignals => ({
@@ -58,9 +62,15 @@ export function targetShares(signals: ZoningMixSignals, available: readonly Zone
   const weights = Object.fromEntries(ZONE_CATEGORIES.map((category) => {
     // A land use the game has not unlocked cannot be zoned: it holds no share, and the others divide the whole.
     if (!available.includes(category)) return [category, 0];
+    const unrealisedNow = unrealizedShare(signals, category);
+    // Shops, offices and industry already standing this empty get no more: their zoning grows nothing until what is there fills (live 2026-10-08:
+    // 9,839 of 10,289 office cells and 6,902 of 11,318 shop cells empty while 97% of the homes' cells were built and housing was the bottleneck).
+    if (category !== "residential" && signals.cells[category].zoned >= SATURATION_MINIMUM_ZONED_CELLS && unrealisedNow >= NON_HOUSING_SATURATED_SHARE) return [category, 0];
     const demand = Math.max(0, Math.min(100, signals.demand[category])) / 100;
-    const unrealised = Math.min(0.9, unrealizedShare(signals, category));
-    return [category, LAND_USE_PRIOR[category] * (0.3 + 0.7 * demand) * (1 - 0.85 * unrealised)];
+    const unrealised = Math.min(0.9, unrealisedNow);
+    // Offices keep no floor: their demand bar is not a signal (V2 P4) and an office zone with no demand stands empty for good.
+    const floor = category === "office" ? 0 : 0.3;
+    return [category, LAND_USE_PRIOR[category] * (floor + (1 - floor) * demand) * (1 - 0.85 * unrealised)];
   })) as Record<ZoneCategory, number>;
   const total = ZONE_CATEGORIES.reduce((sum, category) => sum + weights[category], 0);
   return Object.fromEntries(ZONE_CATEGORIES.map((category) => [category, total > 0 ? weights[category] / total : LAND_USE_PRIOR[category]])) as Record<ZoneCategory, number>;

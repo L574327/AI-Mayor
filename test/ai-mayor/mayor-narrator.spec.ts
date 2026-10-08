@@ -59,9 +59,20 @@ describe("the language expressor: few words, first person, the facts and their f
     expect(waiting[0]!.key).toBe(narrateCycle({ notes: [], waitReason: "NO_USABLE_JOBS_SUPPLY" }, "zh")[0]!.key);
     expect(narrateCycle({ notes: [], waitReason: "NO_USABLE_JOBS_SUPPLY" }, "zh")[0]!.text).toMatch(/缺岗位/);
   });
-  test("a built district says its size and its use, not a fixed sentence", () => {
+  test("a built district says its size and its use — what was laid, not the batch the cash would have paid for", () => {
     const built = narrateCycle({ notes: ["V2 S0 medium | capital-bound batch 1751792 m2", "district (-819.5,-1111.4) 360x160 residential: roads 7/7 landed, 0 refused; zones 38/42"], status: "BUILT" }, "zh")[0]!.text;
-    expect(built).toMatch(/约 175 公顷的住宅区/);
+    expect(built).toMatch(/一片约 6 公顷的住宅区/);
+    const two = narrateCycle({ notes: ["district (0,0) 400x400 residential: roads 10/10 landed, 0 refused; zones 116/120", "batch: district 2 of the same batch",
+      "district (440,0) 400x400 residential: roads 10/10 landed, 0 refused; zones 116/120"], status: "BUILT" }, "zh")[0]!.text;
+    expect(two).toMatch(/新开了 2 片约 32 公顷的住宅区/);
+  });
+  test("the paced waits and the stale zoning repainted as homes are said plainly", () => {
+    expect(narrateCycle({ notes: [], waitReason: "PIPELINE_FULL" }, "zh")[0]!.text).toMatch(/还没住满/);
+    expect(narrateCycle({ notes: [], waitReason: "FUNDS_REFILLING" }, "zh")[0]!.text).toMatch(/底线/);
+    expect(narrateNote("stale zoning: office stand mostly empty while homes are short — 42 spot(s) repainted as homes (120 looked at; 3 dropped by the fresh-read admission, 0 refused)", "zh")!.text)
+      .toMatch(/42 处一直空着的办公地改划成了住宅/);
+    expect(narrateNote("funds: the next district waits for the cash — treasury 371000, a district is laid from 413280 (the spending fuse's floor 330000 and 66000 kept for repairs)", "zh")!.text)
+      .toMatch(/攒到 413,280/);
   });
   test("the gap the growth policy read is said with its numbers; a narrower distance is said once with both figures", () => {
     expect(narrateNote("pipeline: bottleneck JOBS (unemployment 48% (350 people), 5 of 137 jobs open (3.6%): fewer open jobs than people out of work); paused: residential", "zh")!.text).toMatch(/350 人.*48%/);

@@ -648,6 +648,8 @@ export class MayorRuntime {
   #autonomousConstructionPromise: Promise<unknown> | null = null;
   #productionResumeAttempts = 0;
   #abortController = new AbortController();
+  /** The district cycle in progress, which a pause of the player's ends at the next write (`interruptCycle`). */
+  #cycleAbort: AbortController | null = null;
   #lastFailureKind: string | null = null;
   #finalized = false;
   #speed: "normal" | "fast" = "normal";
@@ -857,6 +859,17 @@ export class MayorRuntime {
     if (!tasks || tasks.length === 0) return false;
     if (tasks.some((task) => task.status === "DISPATCHED" || task.activeCommandId)) return false;
     if (tasks.some((task) => task.status === "PENDING" && EXECUTABLE_CONSTRUCTION_TASK_KINDS.has(task.kind))) return false;
+    return true;
+  }
+
+  /**
+   * The player paused: the district cycle in progress ends at its next write instead of finishing its batch (live 2026-10-08: "several seconds after pause the
+   * Mayor was still building"). The session is not stopped; the next cycle starts when the player resumes. True when a cycle was running.
+   */
+  interruptCycle(): boolean {
+    const cycle = this.#cycleAbort;
+    if (!cycle || cycle.signal.aborted) return false;
+    cycle.abort(new Error("paused by the player"));
     return true;
   }
 
@@ -1433,6 +1446,9 @@ export class MayorRuntime {
       careFocus.cyclesLeft -= 1;
       if (careFocus.cyclesLeft <= 0) this.#careFocus = null;
     }
+    // The cycle's own abort (`interruptCycle`): a pause of the player's ends the cycle between two writes, not after a whole batch of districts.
+    const cycleAbort = linkedAbortController(this.#abortController.signal);
+    this.#cycleAbort = cycleAbort.controller;
     try {
       outcome = await builder.runCycle({
         ...(districtIntent ? { intent: districtIntent } : {}),
@@ -1468,12 +1484,15 @@ export class MayorRuntime {
         mayPurchaseLand: facts.treasury !== null && facts.monthlyBalance !== null && process.env.AI_MAYOR_ALLOW_LAND !== "0",
         ...(facts.treasury !== null && facts.monthlyBalance !== null
           ? { finance: { treasury: facts.treasury, monthlyBalance: facts.monthlyBalance } } : {}),
-        signal: this.#abortController.signal,
+        signal: cycleAbort.controller.signal,
       });
     } catch (error) {
-      state.lastStatus = `V2 district builder failed: ${message(error)}`.slice(0, 240);
+      state.lastStatus = `V2 district builder ${cycleAbort.controller.signal.aborted && !this.#abortController.signal.aborted ? "interrupted (paused)" : `failed: ${message(error)}`}`.slice(0, 240);
       this.#emit("status");
       return null;
+    } finally {
+      cycleAbort.unlink();
+      if (this.#cycleAbort === cycleAbort.controller) this.#cycleAbort = null;
     }
     // The player's named problems have had their first, forced round: the next cycles keep them first, without forcing the periodic passes again.
     if (careFocus?.fresh) {

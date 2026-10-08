@@ -38,6 +38,10 @@ export function facilityName(prefab: string, lang: NarratorLang): string {
 const WAIT_ZH: Record<string, string> = {
   HOUSING_HELD: "现在不缺房子，先不开新住宅区。",
   BATCH_BELOW_ONE_DISTRICT: "手里的钱还不够开一整片区，先让城市赚着。",
+  FUNDS_REFILLING: "钱花到底线了，等进账再接着修。",
+  PIPELINE_FULL: "上一批划的地还没住满，住进去一些就开下一片。",
+  GOVERNOR_SUSPENDED: "前几片同类区块没长起来，这类先停一停，先做别的。",
+  PAUSED_BY_PLAYER: "已暂停，手上的路停在原处，继续后接着修。",
   FINANCIAL_RECOVERY: "在止血，暂停扩张，只处理已有的问题。",
   EXPANSION_HELD_BY_PLAYER: "按你说的，不往外扩，只照看现有城市。",
   TREASURY_COVER: "存款撑不起再往外建，先攒一攒。",
@@ -48,6 +52,10 @@ const WAIT_ZH: Record<string, string> = {
 const WAIT_EN: Record<string, string> = {
   HOUSING_HELD: "Homes are not short right now; no new housing district yet.",
   BATCH_BELOW_ONE_DISTRICT: "Not enough cash for a whole district yet; letting the city earn.",
+  FUNDS_REFILLING: "Spent down to the floor; building again as the income comes in.",
+  PIPELINE_FULL: "The last districts aren't filled yet; the next one opens as people move in.",
+  GOVERNOR_SUSPENDED: "The last districts of this kind didn't fill; pausing that kind and doing something else.",
+  PAUSED_BY_PLAYER: "Paused; the streets in hand stay as they are and carry on when resumed.",
   FINANCIAL_RECOVERY: "Stopping the losses: no expansion, only the city's problems.",
   EXPANSION_HELD_BY_PLAYER: "As you asked: no outward growth, only looking after the city.",
   TREASURY_COVER: "The savings can't carry more building outward yet.",
@@ -164,6 +172,18 @@ export function narrateNote(note: string, lang: NarratorLang): Line | null {
     return { key: "homes-relax", tone: "info", text: say(`离工厂 ${m[1]} 米放不下新住宅，下次放宽到 ${m[2]} 米，把空地用起来。`, `No room for homes ${m[1]} m from industry; next time ${m[2]} m, so the free ground gets used.`) };
   if ((m = /^unfilled stock: (\d+) zoned homes stand empty/.exec(note)))
     return { key: "unfilled", tone: "info", text: say(`划好的住宅还空着 ${num(m[1]!, lang)} 格，等住满再开新区，别的照建。`, `${num(m[1]!, lang)} zoned home cells still empty; no new housing until they fill, other uses go on.`) };
+  if ((m = /^stale zoning: (.+?) stand mostly empty while homes are short — (\d+) spot\(s\) repainted as homes/.exec(note)) && Number(m[2]) > 0) {
+    const kinds = [/commercial/.test(m[1]!) ? say("商业", "shop") : null, /office/.test(m[1]!) ? say("办公", "office") : null, /industrial/.test(m[1]!) ? say("工业", "industrial") : null, /medium homes/.test(m[1]!) ? say("没人住的中密", "unlet medium-density") : null]
+      .filter((kind): kind is string => kind !== null);
+    const what = kinds.join(say("、", "/")) || say("商业", "shop");
+    return { key: "stale-homes", tone: "done", text: say(`城市缺房，把 ${m[2]} 处一直空着的${what}地改划成了住宅。`, `Homes are short: ${m[2]} spots of ${what} zoning that stood empty were rezoned as homes.`) };
+  }
+  if ((m = /^governor: .*\| STALL (BUSY|IDLE): in ([\d.]+) game hours/.exec(note)))
+    return { key: "stall", tone: "warn", text: m[1] === "BUSY"
+      ? say(`近 ${Math.round(Number(m[2]))} 个游戏小时城市没长进，我最近做得最多的那类先停下，换别的办法。`, `No progress for ${Math.round(Number(m[2]))} game hours: pausing what I did most and trying something else.`)
+      : say(`近 ${Math.round(Number(m[2]))} 个游戏小时城市没长进、我也一直在等，先破例开一片区打破僵局。`, `No progress for ${Math.round(Number(m[2]))} game hours while I waited: laying one district to break the wait.`) };
+  if ((m = /^funds: the next district waits for the cash — treasury (\d+), a district is laid from (\d+)/.exec(note)))
+    return { key: "funds", tone: "info", text: say(`账上 ${num(m[1]!, lang)}，攒到 ${num(m[2]!, lang)} 再开下一片区（留一份给修路接线）。`, `${num(m[1]!, lang)} in the bank; the next district at ${num(m[2]!, lang)} (some is kept for roads and links).`) };
   if ((m = /^expansion held: the treasury \((-?\d+)\) covers fewer/.exec(note)))
     return { key: "treasury-cover", tone: "blocked", text: say(`账上 ${num(m[1]!, lang)}，撑不起再往外建，先攒钱。`, `${num(m[1]!, lang)} in the bank can't carry more building outward; saving first.`) };
   return null;
@@ -261,13 +281,15 @@ export function narrateSituation(s: Situation, lang: NarratorLang): Line[] {
 export function narrateCycle(input: { notes: readonly string[]; waitReason?: string | null; status?: string | null }, lang: NarratorLang, limit = 2): Line[] {
   const raw = input.notes.map((note) => narrateNote(note, lang)).filter((line): line is Line => line !== null);
   if (input.status === "BUILT") {
-    const area = /batch (\d+) m2/.exec(input.notes.find((note) => note.startsWith("V2 ")) ?? "");
-    const role = input.notes.map((note) => /^district \(.*?\) \d+x\d+ (\w+):/.exec(note)?.[1]).find(Boolean);
-    const hectares = area ? Math.round(Number(area[1]) / 10_000) : null;
+    // What was laid (each district's own note), not the batch the cash would have paid for.
+    const laid = input.notes.map((note) => /^district \(.*?\) (\d+)x(\d+) (\w+):/.exec(note)).filter((match): match is RegExpExecArray => match !== null);
+    const role = laid[0]?.[3];
+    const hectares = laid.length > 0 ? Math.max(1, Math.round(laid.reduce((sum, match) => sum + Number(match[1]) * Number(match[2]), 0) / 10_000)) : null;
+    const count = laid.length;
     const use = role ? (lang === "zh" ? ({ residential: "住宅", commercial: "商业", industrial: "工业", office: "办公" } as Record<string, string>)[role] ?? "" : role) : "";
     raw.unshift({ key: "district", tone: "done", text: lang === "zh"
-      ? `新开了一片${hectares ? `约 ${hectares.toLocaleString("zh-CN")} 公顷的` : ""}${use}区，路和分区都铺好了。`
-      : `Opened a new ${use ? `${use} ` : ""}district${hectares ? ` of about ${hectares.toLocaleString("en-US")} ha` : ""}; streets and zoning are down.` });
+      ? `新开了${count > 1 ? ` ${count} 片` : "一片"}${hectares ? `约 ${hectares.toLocaleString("zh-CN")} 公顷的` : ""}${use}区，路和分区都铺好了。`
+      : `Opened ${count > 1 ? `${count} new` : "a new"} ${use ? `${use} ` : ""}district${count > 1 ? "s" : ""}${hectares ? ` of about ${hectares.toLocaleString("en-US")} ha` : ""}; streets and zoning are down.` });
   }
   // Several lines of one kind in one cycle: one sentence with the count.
   const byKey = new Map<string, Line[]>();

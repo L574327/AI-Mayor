@@ -15,8 +15,32 @@
 import type { SpatialPoint2 } from "../spatial/types";
 import { stampElapsed, type GameStamp } from "./game-clock";
 
-export type ServiceNeed = "deathcare" | "healthcare" | "police" | "fire" | "roads" | "garbage";
-export const SERVICE_NEEDS: readonly ServiceNeed[] = ["deathcare", "healthcare", "police", "fire", "roads", "garbage"];
+export type ServiceNeed = "deathcare" | "healthcare" | "police" | "fire" | "roads" | "garbage" | "education";
+export const SERVICE_NEEDS: readonly ServiceNeed[] = ["deathcare", "healthcare", "police", "fire", "roads", "garbage", "education"];
+
+/**
+ * Education has no icon: its evidence is the labour market. Jobs for well- and highly-educated workers that stand open while the people who could fill
+ * them are not schooled that far (`cs2_labor` jobs.freeByEducation; community guides: "build colleges and universities when high-skill labour is short",
+ * and a university before the offices exist only makes unemployed graduates). The count of such open jobs is handed to the care round as notices of this type,
+ * one notice for each `EDUCATION_JOBS_PER_NOTICE` open jobs, standing at the heart of the city.
+ */
+export const EDUCATION_GAP_NOTICE = "Education Gap (labour market)";
+export const EDUCATION_JOBS_PER_NOTICE = 10;
+/** Open jobs for the educated at which a college is unlocked with development points (and a university once a college stands, at twice this). */
+export const EDUCATION_COLLEGE_OPEN_JOBS = 150;
+export interface EducationGap {
+  /** Open jobs that need a well- or highly-educated worker. */
+  openHigh: number;
+  /** Open jobs that need a poorly-educated or educated worker. */
+  openMiddle: number;
+}
+export function withEducationGap(reading: IconReading, gap: EducationGap | null, centre: SpatialPoint2 | null): IconReading {
+  if (!gap || !centre) return reading;
+  const open = gap.openHigh + gap.openMiddle;
+  const notices = Math.floor(open / EDUCATION_JOBS_PER_NOTICE);
+  if (notices <= 0) return reading;
+  return { counts: { ...reading.counts, [EDUCATION_GAP_NOTICE]: notices }, items: [...reading.items, { type: EDUCATION_GAP_NOTICE, x: centre.x, z: centre.z }] };
+}
 
 /**
  * Road maintenance has no icon of its own: a worn road is slow (NetCondition wear 0..10; maintenance trucks restore it). Its evidence is the worn
@@ -35,6 +59,7 @@ export const SERVICE_EVIDENCE_ICON: Readonly<Record<ServiceNeed, RegExp>> = {
   fire: /Burned Down|On Fire|Fire Hazard|Building Fire/i,
   roads: /^Worn Road/i,
   garbage: /^Garbage Notification/i,
+  education: /^Education Gap/i,
 };
 
 /** A building to unlock through the development tree when no building of the need is unlocked (`tech-tree.ts` unlockPrefabs). */
@@ -57,6 +82,9 @@ export const SERVICE_PREFAB_PREFERENCE: Readonly<Record<ServiceNeed, readonly Re
   // Community guides: a mid-size city runs a MIX (about 2 landfills, 2 recycling centres, 1 incinerator at 37,000 people); the recycling centre is the cheaper
   // and greener one, the incinerator needs to be away from homes (air pollution) but makes power; landfills fill up and are the fallback.
   garbage: [/^RecyclingCenter01$/, /^IncinerationPlant01$/, /^Landfill01$/],
+  // The schooling ladder: high school first (the step the first jobs for the educated ask), elementary where none stands, then the college and the university
+  // (locked until development points buy them: `#provideServices` buys them only while jobs for the educated stand open).
+  education: [/^HighSchool\d+$/, /^ElementarySchool\d+$/, /^College\d+$/, /^University\d+$/],
 };
 
 /** The prefab-name searches that find the buildings of a need (the unlocked ones are then picked by `SERVICE_PREFAB_PREFERENCE`). */
@@ -67,13 +95,14 @@ export const SERVICE_PREFAB_QUERIES: Readonly<Record<ServiceNeed, readonly strin
   fire: ["FireStation", "FireHouse"],
   roads: ["RoadMaintenance"],
   garbage: ["Incinerat", "Recycl", "Landfill"],
+  education: ["HighSchool", "ElementarySchool", "College", "University"],
 };
 
 /**
  * Starting figures, not rules: people per building of each kind, so a city is never given a dozen of them for one stubborn icon.
  * The icons themselves decide whether another is wanted (they must still be there after the last one has had time to work).
  */
-export const SERVICE_POPULATION_PER_BUILDING: Readonly<Record<ServiceNeed, number>> = { deathcare: 4_000, healthcare: 2_500, police: 4_000, fire: 4_000, roads: 8_000, garbage: 10_000 };
+export const SERVICE_POPULATION_PER_BUILDING: Readonly<Record<ServiceNeed, number>> = { deathcare: 4_000, healthcare: 2_500, police: 4_000, fire: 4_000, roads: 8_000, garbage: 10_000, education: 5_000 };
 /** Cycles to wait after placing one before judging whether the icons went. */
 export const SERVICE_COOLDOWN_CYCLES = 3;
 /** The same cooldown in game hours (`game-clock.ts`); the cycle count is the fallback when the game clock cannot be read. */

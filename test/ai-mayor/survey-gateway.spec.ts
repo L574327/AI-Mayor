@@ -76,7 +76,32 @@ describe("survey: the entrance of a district", () => {
     const diagnostics = { noOwnedTiles: false, noServedRoadNetwork: false, considered: 0, excluded: 0,
       outsideOwnedLand: 0, buildingClearance: 0, landUseIsolation: 0, existingRoad: 0, noGateway: 0, blockedGateway: 0, offered: 0 };
     expect(surveyDistrictSites({ world: servedWorld(), buildings, rectangles: [rectangle], diagnostics })).toHaveLength(0);
-    expect(diagnostics.blockedGateway).toBe(1);
+    // Every placement of the rectangle (drawn back a block from the street: two corners now) has its every entrance blocked.
+    expect(diagnostics.blockedGateway).toBeGreaterThanOrEqual(1);
     expect(diagnostics.buildingClearance).toBe(0);
+  });
+});
+
+describe("survey: the seam between a district and the street beside it", () => {
+  test("a rectangle 80 m from a street it runs along is drawn back to a whole block (120 m), so the strip between is zoned from both streets", () => {
+    const sites = surveyDistrictSites({ world: servedWorld(), buildings: [], rectangles: [{ minX: 122.5, minZ: 17.5, widthMeters: 400, heightMeters: 400 }] });
+    expect(sites.length).toBeGreaterThan(0);
+    for (const site of sites) expect(site.anchor.z - -62.5).toBeGreaterThanOrEqual(120);
+  });
+
+  test("a rectangle already a block or more from the street keeps its place", () => {
+    const sites = surveyDistrictSites({ world: servedWorld(), buildings: [], rectangles: [{ minX: 122.5, minZ: 97.5, widthMeters: 240, heightMeters: 240 }] });
+    expect(sites[0]!.anchor.z).toBeCloseTo(97.5);
+  });
+
+  test("a rectangle the seam would leave narrower than a district is used as it is", () => {
+    const sites = surveyDistrictSites({ world: servedWorld(), buildings: [], rectangles: [{ minX: 122.5, minZ: -22.5, widthMeters: 240, heightMeters: 200 }] });
+    expect(sites.length).toBeGreaterThan(0);
+  });
+
+  test("the policy's own growth is held to the template side", () => {
+    const sites = surveyDistrictSites({ world: servedWorld(), buildings: [], rectangles: [{ minX: 22.5, minZ: 97.5, widthMeters: 840, heightMeters: 760 }], maximumSideMeters: 400 });
+    expect(sites.length).toBeGreaterThan(0);
+    for (const site of sites) { expect(site.widthMeters).toBeLessThanOrEqual(400); expect(site.heightMeters).toBeLessThanOrEqual(400); }
   });
 });

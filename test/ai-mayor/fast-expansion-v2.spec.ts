@@ -508,10 +508,32 @@ describe("V2 in the district builder", () => {
     expect(zones.filter((zone) => zone === "residential:MEDIUM").length).toBeGreaterThan(1);
   });
 
-  test("a small batch is one district", async () => {
+  test("a batch the size of one template district is one district", async () => {
+    // (220,000 - 150,000 reserve) x 0.8 / 0.3 = about 187,000 m2: one 400 x 400 template, and less than a district left over.
+    const result = await new DistrictBuilder(harness({ series: growingSeries(200), mix: mixWith(byDensity([40_000, 100, 30], [8_000, 100, 80])) }), { maximumSitesPerCycle: 1 })
+      .runCycle(cycleInput({ finance: { treasury: 220_000, monthlyBalance: 0 } }));
+    expect(result.status).toBe("BUILT");
+    expect(result.notes.join(" | ")).not.toMatch(/district 2 of the same batch/);
+  });
+
+  test("the policy's own districts are template-sized: a batch for two is laid as two copies, not one big grid (the player's ruling, 2026-10-08)", async () => {
     const result = await new DistrictBuilder(harness({ series: growingSeries(200), mix: mixWith(byDensity([40_000, 100, 30], [8_000, 100, 80])) }), { maximumSitesPerCycle: 1 })
       .runCycle(cycleInput({ finance: { treasury: 260_000, monthlyBalance: 0 } }));
-    expect(result.notes.join(" | ")).not.toMatch(/district 2 of the same batch/);
+    const sizes = [...result.notes.join(" | ").matchAll(/district \([-\d.]+,[-\d.]+\) (\d+)x(\d+) residential/g)].map((match) => [Number(match[1]), Number(match[2])]);
+    expect(sizes.length).toBeGreaterThan(0);
+    for (const [width, height] of sizes) { expect(width).toBeLessThanOrEqual(400); expect(height).toBeLessThanOrEqual(400); }
+  });
+
+  test("snowball: the next district follows the empty zoning of the density being laid, never the stock of a density left out", async () => {
+    const before = process.env.AI_MAYOR_GROWTH_STYLE;
+    process.env.AI_MAYOR_GROWTH_STYLE = "SNOWBALL";
+    try {
+      // Low density (laid) has 4,000 of its cells empty: more than the two template districts the city may hold ahead, so nothing is laid.
+      const roads: string[] = [];
+      const full = await new DistrictBuilder(harness({ roads, mix: mixWith(byDensity([43_585, 4_000, 60], [14_512, 10_059, 0])) }), { maximumSitesPerCycle: 1 }).runCycle(cycleInput());
+      expect(roads).toHaveLength(0);
+      expect(full.notes.join(" | ")).toMatch(/pipeline \(residential\): 4000 homes' cells stand empty/);
+    } finally { if (before === undefined) delete process.env.AI_MAYOR_GROWTH_STYLE; else process.env.AI_MAYOR_GROWTH_STYLE = before; }
   });
 
   test("growth freezes after K negative months in a row; repairs are not a growth and the cycle builds nothing", async () => {

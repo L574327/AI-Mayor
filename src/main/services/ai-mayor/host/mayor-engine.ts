@@ -19,7 +19,7 @@ import { parseV2McpJson } from "../v2/main-adapter";
 import { parseObjectiveProfile } from "../v2/objective-profile";
 import type { AcceptedRevision } from "../semantic-compiler/types";
 import { type ProtectedArea, protection } from "../v2/protection";
-import { type Funds, poorAtTakeover, SpendGuard, SpendGuardRefusal, spendGuardConfigFrom, spends } from "../v2/spend-guard";
+import { type Funds, poorAtTakeover, SPEND_FLOOR_ENV, SPEND_HOURLY_CAP_ENV, SpendGuard, SpendGuardRefusal, spendGuardConfigFrom, spends } from "../v2/spend-guard";
 import { AUTONOMY_STABILIZATION_POPULATION } from "../growth-mode";
 import { type Line as NarratedLine, narrateCycle, narrateFinance, narrateSituation, type NarratorLang, type Situation } from "./mayor-narrator";
 import { type CityDistrict, FORBID_KINDS, type ForbidKind, type Instruction, type Lowered, lowerInstruction, mergeProtectedAreas } from "./intent-lowering";
@@ -43,6 +43,13 @@ const QUICK_WAIT_REST_MS = 3_000;
 /** The slow-down of cycles that build nothing in a row (see the main loop). */
 const IDLE_BACKOFF_BASE_MS = 3_000;
 const IDLE_BACKOFF_MAX_MS = 30_000;
+/**
+ * A wait that is the growth's own pace (`PACED_WAIT`: the next template district waits for the last ones to fill, or for the cash) is looked at again at a
+ * steady short interval and never slowed down: the next district must follow within seconds of the city being ready for it (the player's ruling, 2026-10-08:
+ * fewer pauses, a faster rhythm). Each such cycle still zones frontage, repaints stale zoning and runs the care round.
+ */
+const PACED_WAIT_REST_MS = 5_000;
+const PACED_WAIT = /^(BATCH_BELOW_ONE_DISTRICT|FUNDS_REFILLING|PIPELINE_FULL|GOVERNOR_SUSPENDED)$/;
 let idleStreak = 0;
 const WAIT_FOR_GAME_EVERY_MS = 3_000;
 
@@ -65,13 +72,16 @@ let clearLimits: () => void = () => undefined;
 /** The last cycle's outcome (BUILD / WAIT / ...), from the decision row, and how many player instructions were handled. */
 let lastOutcome: string | null = null;
 let lastWaitWasQuick = false;
+/** The last wait was the pace of the growth itself (the city filling what was laid, the cash coming in), not a dead end. */
+let lastWaitWasPaced = false;
 let commandsHandled = 0;
 
 process.on("message", (raw: unknown) => {
   const message = raw as HostMessage;
-  if (message.k === "pause") { paused = true; send({ k: "phase", phase: "PAUSING" }); }
+  // A pause ends the cycle in hand at its next write (`interruptCycle`), not after its whole batch of districts.
+  if (message.k === "pause") { paused = true; send({ k: "phase", phase: "PAUSING" }); runtime?.interruptCycle(); }
   else if (message.k === "resume") { paused = false; send({ k: "phase", phase: "RUNNING" }); }
-  else if (message.k === "stop") { stopping = true; }
+  else if (message.k === "stop") { stopping = true; runtime?.interruptCycle(); }
   else if (message.k === "command") { queuedCommands.push(message); void drainCommands(); }
   else if (message.k === "clear-limits") clearLimits();
 });
@@ -221,6 +231,11 @@ async function main(): Promise<void> {
     const config = spendGuardConfigFrom(obj(store.settings), process.env);
     if (num(reference.money) !== null) {
       fuse = new SpendGuard(num(reference.money)!, reference.poor === true, readFunds, config);
+      // The planners size their work under the fuse, not into it (`plannerSpendFloor`): a fuse that refuses nothing is not announced.
+      if (config.mode !== "OFF" && !fuse.poor) {
+        process.env[SPEND_FLOOR_ENV] = String(Math.round(fuse.floor + fuse.margin));
+        process.env[SPEND_HOURLY_CAP_ENV] = String(Math.round(fuse.hourlyCap));
+      } else { delete process.env[SPEND_FLOOR_ENV]; delete process.env[SPEND_HOURLY_CAP_ENV]; }
       send({ k: "phase", phase: "STARTING", detail: `spending fuse: ${config.mode}, floor ${Math.round(fuse.floor)}, ${Math.round(fuse.hourlyCap)} per game hour${fuse.poor ? " (poor city: stands down)" : ""}` });
     }
   };
@@ -234,6 +249,8 @@ async function main(): Promise<void> {
   process.env.AI_MAYOR_EXPERIENCE_FILE ??= path.join(dataDir, "access-experience.jsonl");
   // The experience that tunes the order of repair candidates (`v2/experience-book.ts`): one per player, kept across saves.
   process.env.AI_MAYOR_EXPERIENCE_BOOK ??= path.join(dataDir, "experience-book.json");
+  // The growth governor's outcome scores (`v2/growth-governor.ts`): which supply actions filled and which did not, kept across saves like the experience book.
+  process.env.AI_MAYOR_GOVERNOR_FILE ??= path.join(dataDir, "governor.json");
   // The subtitle: facts of each cycle as sentences (`mayor-narrator.ts`), in the language the player last spoke; a line is not repeated within 10 minutes.
   let narrationLang: NarratorLang = process.env.AI_MAYOR_LANG === "en" ? "en" : "zh";
   // The same sentence is not said again within 45 minutes, and one kind of line (its key) not more than once in 3: a player who watches the subtitle
@@ -276,6 +293,7 @@ async function main(): Promise<void> {
         waitReason: typeof parsed.waitReason === "string" ? parsed.waitReason : null, status: typeof parsed.status === "string" ? parsed.status : null }, narrationLang));
       if (typeof parsed.outcome === "string") lastOutcome = parsed.outcome;
       lastWaitWasQuick = parsed.outcome === "WAIT" && (num(parsed.elapsedMs) ?? Infinity) < 2_000 && /^(NO_USABLE_|HOUSING_HELD)/.test(String(parsed.waitReason ?? ""));
+      lastWaitWasPaced = parsed.outcome === "WAIT" && PACED_WAIT.test(String(parsed.waitReason ?? ""));
       send({ k: "decision", data: { at: new Date().toISOString(), status: typeof parsed.status === "string" ? parsed.status : null,
         outcome: typeof parsed.outcome === "string" ? parsed.outcome : null, waitReason: typeof parsed.waitReason === "string" ? parsed.waitReason : null,
         elapsedMs: num(parsed.elapsedMs), notes: Array.isArray(parsed.notes) ? (parsed.notes as unknown[]).map(String).slice(0, 120) : [] } });
@@ -513,6 +531,7 @@ async function main(): Promise<void> {
     }
     if (wasPaused) { wasPaused = false; send({ k: "phase", phase: "RUNNING" }); }
     lastOutcome = null;
+    lastWaitWasPaced = false;
     const handledBefore = commandsHandled;
     const state = await runtime.singleTick();
     send({ k: "cycle" });
@@ -524,9 +543,10 @@ async function main(): Promise<void> {
     // ran a full world read every 7 s for nothing. The pause ends early for a player instruction, a pause or a stop.
     // Cycles that build nothing in a row (a replan, no feasible site, a wait) slow down step by step — 3, 6, 12, up to 30 s — so a dead end the Mayor has
     // not recognised yet cannot spin at full speed (live 2026-10-08: REPLAN_REQUIRED every 5 s on land the roads could not reach); a built cycle resets it.
-    idleStreak = lastOutcome === "BUILD" || lastOutcome === null ? 0 : idleStreak + 1;
+    idleStreak = lastOutcome === "BUILD" || lastOutcome === null || lastWaitWasPaced ? 0 : idleStreak + 1;
     const backoff = idleStreak <= 1 ? 0 : Math.min(IDLE_BACKOFF_MAX_MS, IDLE_BACKOFF_BASE_MS * 2 ** (idleStreak - 2));
-    const rest = lastOutcome === "WAIT" ? Math.max(lastWaitWasQuick ? QUICK_WAIT_REST_MS : WAIT_CYCLE_REST_MS, backoff) : backoff;
+    const rest = lastWaitWasPaced ? PACED_WAIT_REST_MS
+      : lastOutcome === "WAIT" ? Math.max(lastWaitWasQuick ? QUICK_WAIT_REST_MS : WAIT_CYCLE_REST_MS, backoff) : backoff;
     if (rest > 0) {
       const until = Date.now() + rest;
       while (Date.now() < until && !stopping && !paused && queuedCommands.length === 0 && commandsHandled === handledBefore) {

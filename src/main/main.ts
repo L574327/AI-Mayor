@@ -250,6 +250,9 @@ const protocol = app.isPackaged ? "app.aimayor" : "dev.aimayor";
 // The installed app IS the AI Mayor product; the chat client underneath is for development (or AI_MAYOR_CHAT_CLIENT=1).
 const AI_MAYOR_PRODUCT_MODE = isAiMayorProductMode() || (app.isPackaged && process.env.AI_MAYOR_CHAT_CLIENT !== "1");
 let aiMayorTray: Tray | null = null;
+/** The quit in product mode: the Mayor is being stopped (`mayorQuitting`), then the quit goes through (`mayorQuitDone`). */
+let mayorQuitting = false;
+let mayorQuitDone = false;
 if (AI_MAYOR_PRODUCT_MODE) process.env[AI_MAYOR_PRODUCT_MODE_ENV] = "1";
 
 const startProductAutonomyWhenCityToolsAreReady = () => {
@@ -485,6 +488,9 @@ if (!gotTheLock) {
         // The window buttons sit on the console's own dark surface.
         try { consoleWindow?.setTitleBarOverlay({ color: "#f4f6fa", symbolColor: "#4a5568", height: 32 }); } catch { /* no overlay on this platform */ }
         consoleWindow?.setMinimumSize(980, 680);
+        // Closing the console is quitting the product (the player's expectation, 2026-10-08: "after exiting, the floating button cannot be closed"): the Mayor stops
+        // and the windows over the game go with it. Pausing is the console's pause button, the bar's, or the tray's.
+        consoleWindow?.on("close", () => { if (!mayorQuitting) app.quit(); });
         if (consoleWindow && consoleWindow.getSize()[0] < 1280) { consoleWindow.setSize(1320, 880); consoleWindow.center(); }
       }
       // The product's Mayor is the supervised engine process (`host/`); the old in-process start stays for development only.
@@ -547,7 +553,21 @@ if (!gotTheLock) {
         }
       });
 
-      app.on("before-quit", async () => {
+      app.on("before-quit", async (event) => {
+        // Quitting stops the Mayor first, the way the console's stop does (the write in hand finishes, the game is handed back running), and closes the windows over
+        // the game: killing the engine mid-write left a batch half laid, and the Mayor's button stayed on the screen with nothing behind it (live 2026-10-08).
+        if (AI_MAYOR_PRODUCT_MODE && !mayorQuitDone) {
+          event.preventDefault();
+          if (mayorQuitting) return;
+          mayorQuitting = true;
+          Container.inject(Renderer).closeMayorWindows();
+          // Only a Mayor that holds the city is stopped (a stop also hands the game back at normal speed, which a player who never took over did not ask for).
+          const phase = mayorConsoleSupervisor?.state.phase;
+          if (phase && !["IDLE", "STOPPED", "FAILED"].includes(phase)) { try { await mayorConsoleSupervisor?.stop(); } catch { /* the quit goes on */ } }
+          mayorQuitDone = true;
+          app.quit();
+          return;
+        }
         const logger = Container.inject(Logger).scope("Main:AppOnBeforeQuit");
         ipcMain.removeAllListeners();
         globalShortcut.unregister(AI_MAYOR_OVERLAY_SHORTCUT);

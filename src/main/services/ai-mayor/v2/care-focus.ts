@@ -22,12 +22,12 @@
 import type { MayorStructuredGoalIntent } from "../types";
 import type { ServiceNeed } from "./district-services";
 
-export type CareFocus = "TRAFFIC" | "NOISE" | "RUINS" | "ACCESS" | "CRIME" | "FIRE" | "HEALTH" | "DEATHCARE" | "GARBAGE" | "FINANCE";
+export type CareFocus = "TRAFFIC" | "NOISE" | "RUINS" | "ACCESS" | "CRIME" | "FIRE" | "HEALTH" | "DEATHCARE" | "GARBAGE" | "FINANCE" | "EDUCATION";
 export const CARE_ISSUES: readonly CareFocus[] = ["TRAFFIC", "NOISE", "RUINS", "ACCESS", "CRIME", "FIRE", "HEALTH", "DEATHCARE", "GARBAGE", "FINANCE"];
 /** The issues the Mayor answers by a write today. */
 export const ANSWERED_ISSUES: ReadonlySet<CareFocus> = new Set<CareFocus>(["TRAFFIC", "NOISE", "RUINS", "ACCESS", "CRIME", "FIRE", "HEALTH", "DEATHCARE", "GARBAGE", "FINANCE"]);
 
-export const SERVICE_FOCUS: Readonly<Record<ServiceNeed, CareFocus>> = { deathcare: "DEATHCARE", healthcare: "HEALTH", police: "CRIME", fire: "FIRE", roads: "TRAFFIC", garbage: "GARBAGE" };
+export const SERVICE_FOCUS: Readonly<Record<ServiceNeed, CareFocus>> = { deathcare: "DEATHCARE", healthcare: "HEALTH", police: "CRIME", fire: "FIRE", roads: "TRAFFIC", garbage: "GARBAGE", education: "EDUCATION" };
 
 /** The problems a goal names, or null for a goal that is not about the city's problems (expansion, utilities, ...). */
 export function careFocusFrom(intent: MayorStructuredGoalIntent | null | undefined): CareFocus[] | null {
@@ -38,7 +38,7 @@ export function careFocusFrom(intent: MayorStructuredGoalIntent | null | undefin
     return kind === "POLICE" ? ["CRIME"] : kind === "FIRE" ? ["FIRE"] : kind === "HEALTHCARE" ? ["HEALTH"] : null;
   }
   if (intent.type === "RESOLVE_ISSUES") {
-    const issues = (intent.scope?.issues ?? []).filter((issue): issue is CareFocus => (CARE_ISSUES as readonly string[]).includes(issue));
+    const issues = ((intent.scope?.issues ?? []) as readonly string[]).filter((issue): issue is CareFocus => (CARE_ISSUES as readonly string[]).includes(issue));
     // "All the problems" is not "stop the bleeding": finance (growth stops, the recovery loop leads) only when the player names it.
     return issues.length > 0 ? [...new Set(issues)] : CARE_ISSUES.filter((issue) => issue !== "FINANCE");
   }
@@ -58,6 +58,7 @@ const PLAN: Readonly<Record<CareFocus, { zh: string; en: string }>> = {
   DEATHCARE: { zh: "殡葬：在等灵车的地方建墓地", en: "deathcare: a cemetery where citizens wait for a hearse" },
   FINANCE: { zh: "财政：城市在亏钱——暂停扩张，按已有的止血流程小步、可撤回地调整（过剩的服务预算、税率、没接上网络的设施），账本稳住后自动恢复原来的模式", en: "finance: the city loses money — growth pauses and the existing recovery loop takes small, reversible steps (surplus service budgets, taxes, unattached facilities); the previous mode returns once the books hold" },
   GARBAGE: { zh: "垃圾：在远离住宅、靠街的空地上建垃圾填埋场", en: "garbage: a landfill on free land beside a street, away from homes" },
+  EDUCATION: { zh: "教育：高学历岗位空着等人时，建中学/学院/大学，让居民学历跟上岗位", en: "education: while jobs for educated workers stand open, schools, a college and a university so the citizens' schooling catches up with the jobs" },
 };
 
 /** What the Mayor will do about each named problem, for the player to read when they ask. */

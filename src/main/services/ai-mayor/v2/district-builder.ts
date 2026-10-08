@@ -13,7 +13,7 @@ import { RoadCare, type RoadCareMemory, type RoadCarePort } from "./road-care";
 import { type CareFocus, SERVICE_FOCUS } from "./care-focus";
 import { civicRotationToward, civicSiteCandidates, CIVIC_SETBACKS_METERS } from "./civic-service";
 import {
-  densestIcon, iconClusters, iconCount, RefusedPlacements, reservedLotOf, reserveSpotIndices, serviceCap, serviceLimit, servicePrefabs, servicesWanted, SERVICE_COOLDOWN_CYCLES, SERVICE_COOLDOWN_HOURS, SERVICE_EVIDENCE_ICON,
+  densestIcon, EDUCATION_COLLEGE_OPEN_JOBS, type EducationGap, iconClusters, iconCount, RefusedPlacements, withEducationGap, reservedLotOf, reserveSpotIndices, serviceCap, serviceLimit, servicePrefabs, servicesWanted, SERVICE_COOLDOWN_CYCLES, SERVICE_COOLDOWN_HOURS, SERVICE_EVIDENCE_ICON,
   SERVICE_MINIMUM_ICONS, SERVICE_NEEDS, SERVICE_PREFAB_QUERIES, garbageBuildingCap, SERVICE_UNLOCK_PREFABS, splitOutsideOwnedLand, withWornRoads, SERVICE_STUCK_CYCLES, SERVICE_STUCK_HOURS, SERVICE_STUCK_MAXIMUM_MULTIPLE, SERVICE_STUCK_REFUSAL_HOURS,
   type IconReading, type ServiceNeed,
 } from "./district-services";
@@ -81,9 +81,12 @@ const darkKey = (point: SpatialPoint2): string => `${Math.round(point.x / 400)},
 import { linkTrainStation, railAnchor, TRAIN_LINK_MAXIMUM_ATTEMPTS, type TrainLinkPort } from "./train-link";
 import { ensureTrainLoop, type TransitPort } from "./transit-lines";
 import {
-  absorbableCells, batchConstraint, capitalAreaCap, chooseGrowthRole, chooseResidentialDensity, decideGrowthAfterSearch, FinanceWatch, gameMonthKey, growthAdmission, growthDecaying, growthStage, netGrowthPerDay,
-  MINIMUM_POPULATION_FOR_RATES, MINIMUM_REALIZATION_AREA_SQUARE_METERS, POLICY_GAME_VERSION, QUOTA_YIELD_CYCLES, QUOTA_YIELD_HOURS, SEED_BATCH_SQUARE_METERS, SMALLEST_DISTRICT_SQUARE_METERS, type Constraint, type DensityState, type GrowthStage, type PopulationSeries, type ResidentialDensityKey,
+  absorbableCells, batchConstraint, capitalAreaCap, capitalReserve, chooseGrowthRole, chooseResidentialDensity, COST_PER_SQUARE_METER, decideGrowthAfterSearch, FinanceWatch, gameMonthKey, growthAdmission, growthDecaying, growthStage, netGrowthPerDay,
+  MINIMUM_POPULATION_FOR_RATES, MINIMUM_REALIZATION_AREA_SQUARE_METERS, operatingReserve, POLICY_GAME_VERSION, QUOTA_YIELD_CYCLES, QUOTA_YIELD_HOURS, SEED_BATCH_SQUARE_METERS, SMALLEST_DISTRICT_SQUARE_METERS, snowballPipelineCells,
+  TEMPLATE_DISTRICT_CELLS, TEMPLATE_DISTRICT_SIDE_METERS, TEMPLATE_DISTRICT_SQUARE_METERS, type Constraint, type DensityState, type GrowthStage, type PopulationSeries, type ResidentialDensityKey,
 } from "./growth-policy";
+import { isSpendRefusal, plannerHourlyCap, plannerSpendFloor } from "./spend-guard";
+import { fileGovernorStore, GrowthGovernor, supplyFamily, type GovernedUse, type GovernorSample, type GovernorStore, type GovernorVerdict } from "./growth-governor";
 import { DEFERRED_REVIEW_EVERY_CYCLES, DEFERRED_REVIEW_EVERY_HOURS, immediateWithoutAnswer, triageNotifications } from "./notification-tiers";
 import { type ClearingBuilding, planClearing } from "./big-building-site";
 import { distanceBand, type ExperienceBook, optionFamily } from "./experience-book";
@@ -93,7 +96,7 @@ import {
   slopePercentAround, ZONING_SLOPE_PERCENT, sampleTerrain, usableLandShare, MINIMUM_RECTANGLE_SIDE_METERS, type LandRectangle,
 } from "./district-land";
 import {
-  allocateByDeficit, assignDistrictSpots, emptyMix, mixDeficits, targetShares, unrealizedShare, ZONE_CATEGORIES, type ZoneCategory, type ZoningMixSignals,
+  allocateByDeficit, assignDistrictSpots, categoryOfZoneName, emptyMix, mixDeficits, targetShares, unrealizedShare, ZONE_CATEGORIES, type ZoneCategory, type ZoningMixSignals,
 } from "./zoning-mix";
 import {
   centreMatchesIntent, centreOf, intentNamesAPlace, intentOrder, INTENT_WATERFRONT_MINIMUM_WATER_SHARE,
@@ -232,7 +235,7 @@ export const ORPHAN_STUB_BUILDING_CLEARANCE_METERS = 30;
 /** A dead-end chain no longer than this, ending at a junction, with nothing built beside it, is a spur. */
 export const SPUR_MAXIMUM_METERS = 130;
 /** What a service need counts: notices for most, worn stretches of jammed roads for road maintenance (the game shows wear on the road panel, not as an icon). */
-const evidence = (need: ServiceNeed, count: number): string => (need === "roads" ? `worn road stretch(es): ${count}` : `icons: ${count}`);
+const evidence = (need: ServiceNeed, count: number): string => (need === "roads" ? `worn road stretch(es): ${count}` : need === "education" ? `open jobs for the schooled: ${count * 10}` : `icons: ${count}`);
 /** A street counts as laid by this Mayor when both its ends lie within this distance of one of the courses it submitted. */
 export const OWN_COURSE_TOLERANCE_METERS = 3;
 /** A district with less than this share of its planned streets standing is a failed fragment: not zoned, and its dead ends are pruned. */
@@ -245,6 +248,8 @@ export const MINIMUM_BRUSH_RADIUS_METERS = 10;
 /** Rezoning empty housing: only while this share of the housing zoning stands empty, never more than this share of the empty spots at once. */
 export const REZONE_MINIMUM_UNREALIZED_SHARE = 0.4;
 export const REZONE_MAXIMUM_SHARE_OF_EMPTY_HOMES = 0.5;
+/** Empty homes are repainted only into a use whose own zoning stands less empty than this. */
+export const REZONE_TARGET_MAXIMUM_UNREALIZED_SHARE = 0.3;
 /** A brush spot covers about this many zoning cells; turns a share of the city into a number of spots. */
 export const REZONE_CELLS_PER_SPOT = 30;
 /** After rezoning, the empty housing must have fallen below this fraction of what it was, or the repaint is judged not to work. */
@@ -276,6 +281,23 @@ export const UNREACHABLE_TILE_REFUSALS = 8;
 export const UNREACHABLE_TILE_HOURS = 6;
 export const UNREACHABLE_TILE_CYCLES = 30;
 /** Snowball buys land ahead only while districts are being laid: within this long of the last one. */
+/** The tax lever (`#taxLever`): looked at this often, never below this rate. */
+export const TAX_REVIEW_HOURS = 4;
+export const TAX_REVIEW_CYCLES = 8;
+export const TAX_LOWER_FLOOR = 5;
+/** The repeat guard: a street the game refused this many times is not put to it again (build or dry run) for this long. */
+export const REPEAT_REFUSALS_LIMIT = 2;
+export const REPEAT_REFUSAL_HOURS = 24;
+export const REPEAT_REFUSAL_CYCLES = 60;
+/** At or above this residential building demand (and with no industrial demand), a labour reading saying "jobs are short" is not acted on. */
+export const HOMES_DEMAND_OUTRANKS_LABOR = 80;
+/** A utility shortfall holds new zoning only while at least this many buildings show the outage (`#outageIcons`). */
+export const UTILITY_OUTAGE_ICON_MINIMUM = 10;
+const UTILITY_OUTAGE_ICON = /^(Electricity|Water|Sewage) Notification/i;
+/** Snowball keeps land for this many template districts in hand (`#buyLandAhead`). */
+export const SNOWBALL_LAND_AHEAD_TEMPLATES = 4;
+/** A tile's price when the game has not quoted one lately (measured 2026-10-08: 52,531 then 70,429; it rises with every tile). */
+export const LAND_AHEAD_TILE_PRICE_ESTIMATE = 75_000;
 export const SNOWBALL_LAND_AHEAD_AFTER_BUILD_HOURS = 2;
 export const SNOWBALL_LAND_AHEAD_AFTER_BUILD_CYCLES = 10;
 export const NOISE_INDUSTRY_REACH_METERS = 200;
@@ -348,6 +370,35 @@ export const GROUND_READ_MAXIMUM_AGE_CALLS = 6;
 /** Cycles between two sweeps of the owned ground for unzoned frontage when nothing was built meanwhile (64 window reads, ~15 s each sweep). */
 export const UNZONED_SPOTS_PER_CYCLE = 450;
 export const DISTRICT_ROAD_PREFAB = "Medium Road";
+/**
+ * The streets inside a district's ring: the two-lane road (the guides' local street; the ring and the way in stay the four-lane collector that carries the
+ * district's traffic out). Cheaper to lay and to keep (road upkeep is the big early cost of Economy 2.0), quieter beside the homes, and every road carries
+ * water, power and sewage the same.
+ */
+export const DISTRICT_LOCAL_ROAD_PREFAB = "Small Road";
+/** The road a course of a district is laid with: the collector for the way in and the ring, the local street inside. */
+export const districtCoursePrefab = (course: Pick<DistrictCourse, "kind">): string => (course.kind === "LOCAL" ? DISTRICT_LOCAL_ROAD_PREFAB : DISTRICT_ROAD_PREFAB);
+/**
+ * A district laid beside a street it runs alongside keeps a whole block between them (`snapSeams`): the land's free cells start 40 m from a street, so
+ * a district laid there left a 40 m strip between two parallel roads — lots one or two cells deep that nothing useful grows on (live 2026-10-08: almost every
+ * district of the session stood 40 m from its neighbour's ring). A 120 m strip is a block of its own, zoned from both streets.
+ */
+export const SEAM_BLOCK_METERS = 120;
+/** A through street the game refused this many times (its own validation) is left alone for `CORRIDOR_RETRY_HOURS` (live 2026-10-08: one refused 26 times). */
+export const CORRIDOR_MAXIMUM_REFUSALS = 2;
+export const CORRIDOR_RETRY_HOURS = 24;
+export const CORRIDOR_RETRY_CYCLES = 60;
+/** Stale shop and office zoning repainted as homes per pass, the spots read for it, and how often while homes are what the city lacks. */
+export const STALE_HOMES_SPOTS_READ_PER_PASS = 120;
+export const STALE_HOMES_BRUSHES_PER_PASS = 60;
+export const STALE_HOMES_REVIEW_HOURS = 0.5;
+export const STALE_HOMES_REVIEW_CYCLES = 2;
+export const STALE_HOMES_SPOT_STEP_METERS = 40;
+export const STALE_HOMES_BRUSH_RADIUS_METERS = 24;
+/** Cash above the spending fuse's floor a building on free land waits for: the building and then its own road (`#placeBigService`). */
+export const BIG_SERVICE_MINIMUM_HEADROOM = 40_000;
+/** A service whose building cannot stand on one home's lot: no home is ever taken down for it (live 2026-10-08: 11 homes bulldozed for a cemetery). */
+const BIG_SERVICE_PREFAB = /Cemetery|Crematorium|Hospital|Depot|Landfill|Incinerat|Recycl|University|College/i;
 /** Largest first: the builder takes the biggest district the land holds. Every size is a whole number of lattice steps. */
 export const DISTRICT_SHAPES: ReadonlyArray<{ columnWidths: number[]; rowHeights: number[] }> = [
   // Founding districts: about 3.4x and 2.5x the old largest, on the SAME block spacing (120/160 m) so every block still
@@ -583,6 +634,32 @@ function emptySurveyDiagnostics(): DistrictSurveyDiagnostics {
     buildingClearance: 0, landUseIsolation: 0, existingRoad: 0, noGateway: 0, blockedGateway: 0, eligible: 0, limitReached: false, offered: 0 };
 }
 
+/**
+ * A free rectangle drawn back from the streets that run alongside it, so the strip between it and each of them is a whole block (`SEAM_BLOCK_METERS`):
+ * zoned from both streets instead of a 40 m strip of one-cell lots. `lines` are the axis-aligned streets (end points). A rectangle the seams would
+ * leave narrower than a district is kept as it is (the land is used, with its seam).
+ */
+export function snapSeams(rect: LandRectangle, lines: ReadonlyArray<readonly [SpatialPoint2, SpatialPoint2]>): LandRectangle {
+  let minX = rect.minX; let minZ = rect.minZ; let maxX = rect.minX + rect.widthMeters; let maxZ = rect.minZ + rect.heightMeters;
+  const step = GRID_LATTICE_SPACING_METERS;
+  const overlap = (a0: number, a1: number, b0: number, b1: number) => Math.min(Math.max(a0, a1), b1) - Math.max(Math.min(a0, a1), b0);
+  for (const [a, b] of lines) {
+    if (Math.abs(a.x - b.x) < 0.5 && overlap(a.z, b.z, rect.minZ, rect.minZ + rect.heightMeters) >= step) {
+      const x = a.x;
+      if (x < rect.minX - 0.5 && rect.minX - x < SEAM_BLOCK_METERS - 0.5) minX = Math.max(minX, rect.minX + Math.ceil((x + SEAM_BLOCK_METERS - rect.minX - 0.5) / step) * step);
+      const right = rect.minX + rect.widthMeters;
+      if (x > right + 0.5 && x - right < SEAM_BLOCK_METERS - 0.5) maxX = Math.min(maxX, right - Math.ceil((right - (x - SEAM_BLOCK_METERS) - 0.5) / step) * step);
+    } else if (Math.abs(a.z - b.z) < 0.5 && overlap(a.x, b.x, rect.minX, rect.minX + rect.widthMeters) >= step) {
+      const z = a.z;
+      if (z < rect.minZ - 0.5 && rect.minZ - z < SEAM_BLOCK_METERS - 0.5) minZ = Math.max(minZ, rect.minZ + Math.ceil((z + SEAM_BLOCK_METERS - rect.minZ - 0.5) / step) * step);
+      const top = rect.minZ + rect.heightMeters;
+      if (z > top + 0.5 && z - top < SEAM_BLOCK_METERS - 0.5) maxZ = Math.min(maxZ, top - Math.ceil((top - (z - SEAM_BLOCK_METERS) - 0.5) / step) * step);
+    }
+  }
+  if (maxX - minX < MINIMUM_RECTANGLE_SIDE_METERS || maxZ - minZ < MINIMUM_RECTANGLE_SIDE_METERS) return rect;
+  return { minX, minZ, widthMeters: maxX - minX, heightMeters: maxZ - minZ };
+}
+
 export function surveyDistrictSites(input: {
   world: Pick<SpatialWorldModel, "roadGraph" | "ownedTiles">;
   buildings: readonly SpatialPoint2[];
@@ -604,6 +681,8 @@ export function surveyDistrictSites(input: {
   diagnostics?: DistrictSurveyDiagnostics;
   /** Areas the player asked to keep (`protection.ts`): a site or a way in that reaches one is not offered. */
   protection?: Pick<ProtectionRegistry, "rect" | "segment">;
+  /** The longest side of a district this time (the template's for the policy's own growth); default `MAXIMUM_DISTRICT_SIDE_METERS`. */
+  maximumSideMeters?: number;
 }): DistrictSite[] {
   const spacing = GRID_LATTICE_SPACING_METERS;
   const origin = districtLatticeOrigin(input.world);
@@ -660,15 +739,18 @@ export function surveyDistrictSites(input: {
   // Where a district could stand: the land's own maximal rectangles when the caller has read the ground, otherwise the
   // fixed ladder of shapes at every lattice offset (tests, tools, and a host that cannot read terrain).
   const placements: Array<{ x: number; z: number; widthMeters: number; heightMeters: number; columnWidths: number[]; rowHeights: number[]; shapeIndex: number }> = [];
+  const maximumSide = Math.min(MAXIMUM_DISTRICT_SIDE_METERS, input.maximumSideMeters ?? MAXIMUM_DISTRICT_SIDE_METERS);
   if (input.rectangles) {
-    for (const rectangle of input.rectangles) {
+    const axisLines = liveEdges.map((edge) => edgeEnds(edge)).filter(([a, b]) => Math.abs(a.x - b.x) < 0.5 || Math.abs(a.z - b.z) < 0.5);
+    for (const raw of input.rectangles) {
+      const rectangle = snapSeams(raw, axisLines);
       // A rectangle bigger than the treasury should pay for is built smaller INSIDE, from its corner, not skipped: the size follows the
       // cash (study: build scale grows with what the city can carry). Measured live (2026-10-04): with a tight treasury every free
       // rectangle of the owned ground was bigger than the cap, the survey found 0 sites, and the Mayor idled beside 237 ha of free land.
       // A district's side stays inside what the game can lay as one street (8-1500 m): a whole empty map is built district by district, from the
       // corner, not as one 1840 m grid (measured live 2026-10-04, clean start: the grid refused, the builder threw, and nothing was built).
-      let fitWidth = Math.min(rectangle.widthMeters, MAXIMUM_DISTRICT_SIDE_METERS);
-      let fitHeight = Math.min(rectangle.heightMeters, MAXIMUM_DISTRICT_SIDE_METERS);
+      let fitWidth = Math.min(rectangle.widthMeters, maximumSide);
+      let fitHeight = Math.min(rectangle.heightMeters, maximumSide);
       let columnWidths = composeBlocks(fitWidth);
       let rowHeights = composeBlocks(fitHeight);
       if (input.maximumAreaSquareMeters !== undefined) {
@@ -701,6 +783,7 @@ export function surveyDistrictSites(input: {
     for (const [shapeIndex, shape] of DISTRICT_SHAPES.entries()) {
       const widthMeters = shape.columnWidths.reduce((sum, value) => sum + value, 0);
       const heightMeters = shape.rowHeights.reduce((sum, value) => sum + value, 0);
+      if (Math.max(widthMeters, heightMeters) > maximumSide) continue;
       if (input.maximumAreaSquareMeters !== undefined && widthMeters * heightMeters > input.maximumAreaSquareMeters) continue;
       for (let x = snap(bounds.minX, origin.x); x + widthMeters <= bounds.maxX; x += spacing) {
         for (let z = snap(bounds.minZ, origin.z); z + heightMeters <= bounds.maxZ; z += spacing) {
@@ -1040,6 +1123,16 @@ export interface DistrictBuilderPort {
   trainLink?: TrainLinkPort;
   /** Public transport lines (`transit-lines.ts`): the passenger train loop platform -> outside connection -> platform. Absent: no line is made. */
   transit?: TransitPort;
+  /** Open jobs by the schooling they ask (`cs2_labor` jobs.freeByEducation): the evidence of the education need. Absent or null: no education work. */
+  readEducationGap?(signal?: AbortSignal): Promise<EducationGap | null>;
+  /**
+   * The tax lever (`#taxLever`): the rate of each tax area and the penalty the game's own demand factor "Taxes" reports for it (negative: the rate suppresses
+   * that land use's demand), and the one write. Absent: taxes are left alone.
+   */
+  taxes?: {
+    read(signal?: AbortSignal): Promise<Partial<Record<"Commercial" | "Industrial" | "Office", { rate: number; penalty: number }>> | null>;
+    set(area: "Commercial" | "Industrial" | "Office", rate: number, signal?: AbortSignal): Promise<boolean>;
+  };
   /** The road network's own tools (`road-care.ts`): traffic figures, intersections, in-place replacement, road upgrades. Absent: no traffic or noise work. */
   roads?: RoadCarePort;
 }
@@ -1316,6 +1409,59 @@ export class DistrictBuilder {
   /** The price the game last quoted for a tile the cash could not pay, and the cash at the start of this cycle. */
   #tileCostSeen: number | null = null;
   #cashNow: number | null = null;
+  /** The spending fuse refused a write in this cycle, or the treasury stood under its floor when the cycle began: nothing more that costs money is tried. */
+  #fundsRefused = false;
+  /** The treasury and monthly balance the cycle began with (the fuse's floor is judged on them). */
+  #cycleFinance: { treasury: number; monthlyBalance: number } | null = null;
+  /** Cash above the spending fuse's floor (Infinity: no fuse, or it stands down; 0 once it refused this cycle). */
+  #headroom(): number {
+    if (this.#fundsRefused) return 0;
+    const floor = plannerSpendFloor(this.#cycleFinance);
+    return floor === null || !this.#cycleFinance ? Infinity : this.#cycleFinance.treasury - floor;
+  }
+  /** Streets the game refused, by road and course (the repeat guard in the constructor), and how many tries it skipped this cycle. */
+  readonly #repeatRefusals = new Map<string, { count: number; at: GameStamp }>();
+  #repeatSkipped = 0;
+  /** The macro control and feedback layer (`growth-governor.ts`): which uses may be supplied, the stall watchdog, the outcome scores kept across sessions. */
+  readonly #governorStore: GovernorStore | null = process.env.AI_MAYOR_GOVERNOR_FILE ? fileGovernorStore(process.env.AI_MAYOR_GOVERNOR_FILE) : null;
+  readonly #governor = new GrowthGovernor(this.#governorStore?.load() ?? null);
+  #verdict: GovernorVerdict | null = null;
+  #governorSaved = "";
+  /** The governed use a role supplies: homes at the density this cycle chose (low when none was chosen). */
+  #useOf(role: DistrictRole | ZoneCategory): GovernedUse {
+    if (role === "residential") return (this.#chosenDensity?.toLowerCase() as GovernedUse | undefined) ?? "low";
+    return role;
+  }
+  /** A supply action for the governor to judge later: `spots` brushes of `category` (about REZONE_CELLS_PER_SPOT cells each). */
+  #noteSupply(kind: "LAY" | "ZONE", category: DistrictRole | ZoneCategory, spots: number): void {
+    if (spots > 0) this.#governor.noteAction(kind, this.#useOf(category), spots * REZONE_CELLS_PER_SPOT, this.#stamp(this.#cycles));
+  }
+  /** Whether the governor holds back this kind of supply of this category now. */
+  #governorHolds(kind: "LAY" | "ZONE", category: DistrictRole | ZoneCategory): boolean {
+    return this.#governor.isSuspended(supplyFamily(kind, this.#useOf(category)), this.#stamp(this.#cycles));
+  }
+  /** This cycle's reading for the governor: the zoning per use (built = zoned - empty), the game's building demand, people, the books, the problem icons. */
+  async #governorSample(input: DistrictCycleInput): Promise<GovernorSample> {
+    const by = this.#mix.residentialByDensity;
+    const zoned: GovernorSample["zoned"] = {}; const built: GovernorSample["built"] = {}; const demand: GovernorSample["demand"] = {};
+    for (const key of ["low", "medium", "high"] as const) {
+      if (!by) continue;
+      zoned[key] = by[key].zoned; built[key] = by[key].zoned - by[key].empty;
+      demand[key] = input.unlocked && !input.unlocked.densities[key] ? 0 : by[key].demand;
+    }
+    for (const category of ["commercial", "industrial", "office"] as const) {
+      zoned[category] = this.#mix.cells[category].zoned; built[category] = this.#mix.cells[category].zoned - this.#mix.cells[category].empty;
+      demand[category] = this.#available.includes(category) ? this.#mix.demand[category] : 0;
+    }
+    let problemIcons: number | null = null;
+    try {
+      const reading = await this.port.readIcons?.(input.signal);
+      if (reading) problemIcons = Object.entries(reading.counts).reduce((total, [type, count]) => total + (/Level/i.test(type) ? 0 : Number(count) || 0), 0);
+    } catch { /* unread */ }
+    return { stamp: this.#stamp(this.#cycles), population: input.population ?? null, monthlyBalance: input.finance?.monthlyBalance ?? null, problemIcons, zoned, built, demand };
+  }
+  /** Through streets the game refused (its own validation), per corridor: how often and when last (`CORRIDOR_MAXIMUM_REFUSALS`). */
+  readonly #corridorRefusals = new Map<string, { count: number; at: GameStamp }>();
   /** Snowball growth (the player's mode switch, `AI_MAYOR_GROWTH_STYLE`): every unit of cash that can build does; the stock and absorption holds stand down. */
   #snowball(): boolean { return process.env.AI_MAYOR_GROWTH_STYLE === "SNOWBALL"; }
   /** Which step of `INDUSTRIAL_BUFFER_STEPS_METERS` industry is searched at (memory only; a restart starts at the widest). */
@@ -1365,6 +1511,9 @@ export class DistrictBuilder {
    * what permits a demolition, and in a different world the same coordinates may hold the player's own street.
    */
   rebaseline(): void {
+    this.#governor.rebaseline();
+    this.#verdict = null;
+    this.#repeatRefusals.clear();
     this.#refused.clear();
     this.#refusedRectangles.clear();
     this.#zoned.length = 0;
@@ -1484,6 +1633,59 @@ export class DistrictBuilder {
         const now = this.#stamp(this.#cycles);
         return ranked.filter((prefab) => { const why = this.#highValue.blocked(prefab, now); if (why) this.#highValueRefusals.add(`${prefab}: ${why}`); return !why; });
       } } : {}) } } : instrumented;
+    // A write the spending fuse refused marks the cycle (`#fundsRefused`): what else costs money is not tried until the next cycle — each try would put its
+    // preview on the player's screen for nothing (live 2026-10-08: a blue street flashing every cycle for half an hour, 290 refusals). A Proxy, not a copy,
+    // so a test that swaps a port method after construction still reaches the builder.
+    const spending = this.port;
+    const mark = <T extends { ok: boolean; detail: string }>(outcome: T): T => { if (!outcome.ok && isSpendRefusal(outcome.detail)) this.#fundsRefused = true; return outcome; };
+    const markThrown = (error: unknown): never => { if (isSpendRefusal(error instanceof Error ? error.message : String(error))) this.#fundsRefused = true; throw error; };
+    const watched = <F>(target: object, method: F): F => (typeof method !== "function" ? method : (async (...args: unknown[]) => {
+      try { return mark(await (method as (...a: unknown[]) => Promise<{ ok: boolean; detail: string }>).apply(target, args)); } catch (error) { return markThrown(error); }
+    }) as F);
+    // THE REPEAT GUARD (the player's rule, 2026-10-08: "as few repeated failed construction actions as possible"): the same street — same road, same course to
+    // the metre — refused by the game REPEAT_REFUSALS_LIMIT times is not put to the game again for REPEAT_REFUSAL_HOURS, neither as a build nor as a dry run (a
+    // dry run is the preview the player sees). One rule over every caller, so no routine needs its own breaker; the fuse's refusals are about money and do not count.
+    const courseKey = (course: { start: SpatialPoint2; end: SpatialPoint2 }, prefab: string) =>
+      `${prefab}|${Math.round(course.start.x)},${Math.round(course.start.z)}>${Math.round(course.end.x)},${Math.round(course.end.z)}`;
+    const blocked = (key: string) => {
+      const entry = this.#repeatRefusals.get(key);
+      if (!entry || entry.count < REPEAT_REFUSALS_LIMIT) return false;
+      if (stampElapsed(entry.at, this.#stamp(this.#cycles), REPEAT_REFUSAL_HOURS, REPEAT_REFUSAL_CYCLES)) { this.#repeatRefusals.delete(key); return false; }
+      return true;
+    };
+    const refused = (key: string) => {
+      const entry = this.#repeatRefusals.get(key);
+      this.#repeatRefusals.set(key, { count: (entry?.count ?? 0) + 1, at: this.#stamp(this.#cycles) });
+      if (this.#repeatRefusals.size > 5_000) this.#repeatRefusals.delete(this.#repeatRefusals.keys().next().value!);
+    };
+    const guardedBuild = (target: DistrictBuilderPort, method: DistrictBuilderPort["buildRoad"]): DistrictBuilderPort["buildRoad"] => async (course, prefab, signal) => {
+      const key = courseKey(course, prefab);
+      if (blocked(key)) { this.#repeatSkipped += 1; return { ok: false, detail: "REPEATED_REFUSAL_SKIPPED: the game refused this street twice lately" }; }
+      const outcome = await method.call(target, course, prefab, signal);
+      if (!outcome.ok && !isSpendRefusal(outcome.detail)) refused(key);
+      else if (outcome.ok) this.#repeatRefusals.delete(key);
+      return outcome;
+    };
+    const guardedPreflight = (target: DistrictBuilderPort, method: NonNullable<DistrictBuilderPort["preflightRoad"]>): NonNullable<DistrictBuilderPort["preflightRoad"]> => async (course, prefab, signal) => {
+      const key = courseKey(course, prefab);
+      if (blocked(key)) { this.#repeatSkipped += 1; return "REJECT:REPEATED_REFUSAL_SKIPPED"; }
+      const verdict = await method.call(target, course, prefab, signal);
+      if (/^REJECT/.test(verdict)) refused(key);
+      return verdict;
+    };
+    this.port = new Proxy(spending, { get: (target, property, receiver) => {
+      const value = Reflect.get(target, property, receiver);
+      if (property === "buildRoad" && typeof value === "function") return watched(target, guardedBuild(target, value as DistrictBuilderPort["buildRoad"]));
+      if (property === "preflightRoad" && typeof value === "function") return guardedPreflight(target, value as NonNullable<DistrictBuilderPort["preflightRoad"]>);
+      if (property === "purchaseTile") return watched(target, value);
+      if (property === "utilities" && value) {
+        return new Proxy(value as DistrictUtilitiesPort, { get: (utilities, name, inner) => {
+          const member = Reflect.get(utilities, name, inner);
+          return name === "place" || name === "connect" ? watched(utilities, member) : member;
+        } });
+      }
+      return value;
+    } });
     if (remembered) {
       for (const facility of remembered.ownFacilities) this.#ownFacilities.set(`${facility.index}:${facility.version}`, facility);
       for (const district of remembered.zoned) this.#zoned.push({ role: district.role as DistrictRole, rect: district.rect });
@@ -1508,6 +1710,11 @@ export class DistrictBuilder {
   #savedMemory = "";
   /** The bookkeeping that a restart would lose, written whole (and only when it changed) after each cycle. */
   #saveMemory(): void {
+    // The governor's learned scores (one file per player): written only when they changed.
+    if (this.#governorStore) {
+      const scores = JSON.stringify(this.#governor.memory);
+      if (scores !== this.#governorSaved) { this.#governorSaved = scores; this.#governorStore.save(this.#governor.memory); }
+    }
     const store = this.options.memory;
     if (!store || !this.options.memoryKey) return;
     const memory = boundedMemory({ key: this.options.memoryKey, ownFacilities: [...this.#ownFacilities.values()], zoned: this.#zoned.map((district) => ({ role: district.role, rect: district.rect })),
@@ -1538,6 +1745,11 @@ export class DistrictBuilder {
     };
     // The city's time for this cycle's waits (`game-clock.ts`); one cheap read, shared by the whole cycle and its follow-up districts.
     await this.#readClock(input.signal);
+    // The money this cycle may spend: under the spending fuse's floor nothing is tried at all (the fuse would refuse it after the game showed its preview).
+    this.#cycleFinance = input.finance ?? null;
+    this.#fundsRefused = false;
+    this.#repeatSkipped = 0;
+    if (this.#headroom() < 0) this.#fundsRefused = true;
     const admission = growthAdmission({ population: input.population ?? null, targetPopulation: input.targetPopulation ?? null,
       utilityReadComplete: input.utilityReadComplete !== false });
     // The target population reached stops the growth, not the care of the city that stands (live 2026-10-07: problem icons went untended).
@@ -1545,7 +1757,10 @@ export class DistrictBuilder {
     const critical = Object.entries(input.criticalUtilityShortfalls ?? {}).filter((entry): entry is [DistrictUtilityKind, number] => typeof entry[1] === "number");
     let holdNote: string | null = null;
     let repairNotes: string[] = [];
-    if (critical.length > 0) {
+    // Under the spending fuse's floor the repair would be refused after the game showed its preview (live 2026-10-08: three wind turbines asked and refused every
+    // few minutes for half an hour): the zoning waits as it does for a repair that found no site, and the repair runs once the cash is back.
+    if (critical.length > 0 && this.#fundsRefused) repairNotes = [`${critical.map(([kind]) => kind).join("/")} short, but no money above the spending fuse's floor: the repair waits for the cash`];
+    if (critical.length > 0 && !this.#fundsRefused) {
       const repair = await this.repairUtilities({ kinds: critical.map(([kind]) => kind), shortfalls: Object.fromEntries(critical), signal: input.signal });
       // What the repair tried and why it did not stand is the player's to read too (live 2026-10-07: 718 sewage icons and no word of why nothing was built).
       repairNotes = repair.notes.slice(0, 8);
@@ -1563,9 +1778,14 @@ export class DistrictBuilder {
       const waiting = critical.filter(([kind]) => !this.#utilityExhausted.has(kind));
       if (this.#utilityHoldCycles === 0 || !this.#utilityHoldSince) this.#utilityHoldSince = this.#stamp(0);
       this.#utilityHoldCycles += 1;
-      const holdOver = waiting.length === 0 ||
+      // The zoning waits only for an outage the game shows (homes without power or water). A shortfall in the planning margin alone holds nothing: homes grow
+      // without it and the facility follows (live 2026-10-08: fourteen districts laid as bare streets, 23,800 cells of frontage left unzoned, while no building
+      // showed an outage and the game asked for homes at 100 on every density — the city's homes were 98% built, so nothing at all could grow).
+      const outage = await this.#outageIcons(input.signal);
+      const holdOver = waiting.length === 0 || (outage !== null && outage < UTILITY_OUTAGE_ICON_MINIMUM) ||
         stampElapsed(this.#utilityHoldSince, this.#stamp(this.#utilityHoldCycles - 1), UTILITY_ZONING_HOLD_MAXIMUM_HOURS, UTILITY_ZONING_HOLD_MAXIMUM_CYCLES);
-      if (waiting.length === 0) holdNote = `utilities: ${critical.map(([kind]) => kind).join("/")} cannot be placed anywhere the world offers (every candidate tried); zoning goes on without waiting for ${critical.length > 1 ? "them" : "it"}`;
+      if (outage !== null && outage < UTILITY_OUTAGE_ICON_MINIMUM && waiting.length > 0) holdNote = `utilities: ${critical.map(([kind]) => kind).join("/")} short in the planning margin, but only ${outage} building(s) show an outage: zoning goes on, the facility follows`;
+      else if (waiting.length === 0) holdNote = `utilities: ${critical.map(([kind]) => kind).join("/")} cannot be placed anywhere the world offers (every candidate tried); zoning goes on without waiting for ${critical.length > 1 ? "them" : "it"}`;
       else if (!holdOver) input = { ...input, zoningHeld: true };
       else holdNote = `utilities: ${critical.map(([kind]) => kind).join("/")} still not placed after ${this.#frame !== null ? `${UTILITY_ZONING_HOLD_MAXIMUM_HOURS} game hours` : `${UTILITY_ZONING_HOLD_MAXIMUM_CYCLES} cycles`}; zoning goes on without waiting for them`;
     } else { this.#utilityHoldCycles = 0; this.#utilityHoldSince = null; }
@@ -1603,7 +1823,7 @@ export class DistrictBuilder {
       const target = this.#batch.limit;
       let delivered = result.site ? result.site.widthMeters * result.site.heightMeters : 0;
       let remaining = target - delivered;
-      for (let extra = 0; remaining >= MINIMUM_REALIZATION_AREA_SQUARE_METERS && !input.signal?.aborted; extra += 1) {
+      for (let extra = 0; remaining >= MINIMUM_REALIZATION_AREA_SQUARE_METERS && !input.signal?.aborted && !this.#fundsRefused; extra += 1) {
         const next = await this.#runCycle(input, { role: batchRole, remainingArea: remaining });
         if (next.status !== "BUILT") {
           result.notes.push(`batch: ${Math.round(remaining)} m2 undelivered; ${next.notes.at(-1) ?? "no site"}`);
@@ -1634,6 +1854,7 @@ export class DistrictBuilder {
     }
     const summary = outcomes?.summary(from);
     if (summary) result.notes.push(summary);
+    if (this.#repeatSkipped > 0) result.notes.push(`repeat guard: ${this.#repeatSkipped} street(s) the game refused twice lately were not asked again (no preview shown)`);
     if (input.pipelined) {
       // One line first, so a status cut to its first characters still shows what the V2 policy decided.
       result.notes.unshift(`V2 ${this.#stage}${this.#chosenDensity ? ` ${this.#chosenDensity.toLowerCase()}` : ""}${this.#batch ? ` | ${this.#batch.binding}-bound batch ${Math.round(this.#batch.limit)} m2` : ""}`);
@@ -1732,12 +1953,31 @@ export class DistrictBuilder {
       const labor = (await this.port.readLabor?.(signal)) ?? null;
       const knownDemand = (["low", "medium", "high"] as const).filter((key) => input.unlocked?.densities[key])
         .map((key) => this.#mix.residentialByDensity?.[key].demand).filter((value): value is number => typeof value === "number");
-      const focus = classifyBottleneck(labor, knownDemand.length > 0 ? Math.max(...knownDemand) : null);
+      let focus = classifyBottleneck(labor, knownDemand.length > 0 ? Math.max(...knownDemand) : null);
+      // The game's own demand outranks a labour reading that contradicts it: "jobs are short" while the game asks for homes at full demand on every density and
+      // for no industry at all is not a jobs shortage the Mayor can answer (live 2026-10-08: the reading said 45–57% unemployed, the game's residential factors read
+      // Unemployment +14 and FreeWorkplaces +20/+40, industrial building demand 0 — and the new housing districts' frontage was zoned industrial, homes paused).
+      const homesAsked = knownDemand.length > 0 ? Math.max(...knownDemand) : null;
+      if ((focus.bottleneck === "JOBS" || focus.bottleneck === "MATCH") && homesAsked !== null && homesAsked >= HOMES_DEMAND_OUTRANKS_LABOR && input.demand.industrial <= 0) {
+        focus = { bottleneck: "NONE", reason: `${focus.reason}; but the game asks for homes (demand ${homesAsked}) and for no industry, so the labour reading is not acted on` };
+      }
       this.#bottleneck = focus.bottleneck;
       // Snowball: only the labour gap holds a use back (homes while jobs are short); empty stock never does.
       this.#paused = this.#snowball() ? (focus.bottleneck === "JOBS" || focus.bottleneck === "MATCH" ? ["residential" as ZoneCategory] : []).filter((category) => this.#available.includes(category))
         : pausedLandUses(this.#mix, focus.bottleneck, this.#available);
       if (!this.#snowball() && this.#unfilledStockHolds(input, notes) && !this.#paused.includes("residential")) this.#paused.push("residential");
+      // The governor (`growth-governor.ts`) answers before any rule acts: a use the game has no building demand for, or whose zoning stands and does not fill,
+      // or whose supply was measured to have no effect, gets none this cycle — whatever the labour reading, the prior or the cash said.
+      if (!follow) {
+        this.#verdict = this.#governor.observe(await this.#governorSample(input));
+        notes.push(this.#verdict.summary);
+        const verdict = this.#verdict;
+        const densities = (["low", "medium", "high"] as const).filter((key) => !input.unlocked || input.unlocked.densities[key]);
+        for (const category of this.#available) {
+          const closed = category === "residential" ? densities.length > 0 && densities.every((key) => !verdict.uses[key].open) : !verdict.uses[category as GovernedUse].open;
+          if (closed && !this.#paused.includes(category)) this.#paused.push(category);
+        }
+      }
       notes.push(`pipeline: bottleneck ${focus.bottleneck} (${focus.reason}); paused: ${this.#paused.join("/") || "none"}`);
       if (!intent?.role) {
         let blocked = this.#blockedRoles();
@@ -1770,7 +2010,8 @@ export class DistrictBuilder {
     // The hearse and ambulance icons over the districts: a cemetery or a clinic where they hang.
     try { await this.provideServices(world, input, notes); } catch (error) { notes.push(`services: ${error instanceof Error ? error.message.slice(0, 120) : "failed"}`); }
     try { await this.#sellPower(world, input, notes); } catch (error) { notes.push(`power export: ${error instanceof Error ? error.message.slice(0, 120) : "failed"}`); }
-    if (!plan?.frozen) { try { await this.#withdrawStaleZoning(world, input, notes); } catch (error) { notes.push(`stale zoning: ${error instanceof Error ? error.message.slice(0, 120) : "failed"}`); } }
+    if (!plan?.frozen) { try { await this.#taxLever(input, notes); } catch (error) { notes.push(`tax: ${error instanceof Error ? error.message.slice(0, 120) : "failed"}`); } }
+    if (!plan?.frozen) { try { await this.#withdrawStaleZoning(world, input, notes, landUse); } catch (error) { notes.push(`stale zoning: ${error instanceof Error ? error.message.slice(0, 120) : "failed"}`); } }
     if (!plan?.frozen) { try { await this.#linkTrain(world, input, notes); } catch (error) { notes.push(`train: ${error instanceof Error ? error.message.slice(0, 120) : "failed"}`); } }
     if (!plan?.frozen) { try { await this.#placeSignatures(world, input, notes); } catch (error) { notes.push(`signature: ${error instanceof Error ? error.message.slice(0, 120) : "failed"}`); } }
     // P8: after K negative months the growth stops and only repairs go on (the services above and the utility repairs of the Brain).
@@ -1793,7 +2034,18 @@ export class DistrictBuilder {
       // The batch is recomputed on the treasury as it stands after the loan step (P2).
       const sized = this.#withBatch(input, notes, role);
       input = sized.input;
-      if (sized.held && !intent?.role) { notes.push("batch: smaller than one district; nothing is laid and no land is bought for it"); return wait("BATCH_BELOW_ONE_DISTRICT"); }
+      if (sized.held && !intent?.role) {
+        notes.push("batch: smaller than one district; nothing is laid and no land is bought for it");
+        // The city filling what was laid is the growth's own pace, not a want of money: said as what it is.
+        return wait(this.#batch?.binding === "absorption" ? "PIPELINE_FULL" : "BATCH_BELOW_ONE_DISTRICT");
+      }
+      // The fuse refused a write already this cycle (its hourly cap, or the floor): no district is dry-run now — its streets' previews would show for nothing.
+      if (this.#fundsRefused) { notes.push("funds: the spending fuse refused a write this cycle; the next district waits for the cash"); return wait("FUNDS_REFILLING"); }
+      // The governor suspended this kind of district: the ones laid before it did not fill (or the city stalled while they were laid).
+      if (!intent?.role && this.#governorHolds("LAY", role)) {
+        notes.push(`governor: no ${this.#useOf(role)} district for now — that supply was measured to have no effect; the care round and the other uses go on`);
+        return wait("GOVERNOR_SUSPENDED");
+      }
     }
     // BALANCED follows the study: cash >= the build + the net outflow until it pays + a reserve (`expansionCashRequired`), not months of total spending.
     if (!input.pipelined && input.finance && !cashCoversExpansion({ treasury: input.finance.treasury, monthlyExpenses: costs?.monthlyExpenses ?? null })) {
@@ -1863,6 +2115,8 @@ export class DistrictBuilder {
     const surveyed = surveyDistrictSites({ world, buildings: knownBuildings, excludedAnchors: this.#refused,
       limit: pass === 0 ? (intent ? 14 : 6) : (intent ? 40 : 24), role, landUse,
       diagnostics: surveyDiagnostics, protection, industrialBufferMeters: this.#industrialBuffer(), homeBufferMeters: this.#homeBuffer(),
+      // The policy's own growth copies the template district; a player who asked for something is not held to its size.
+      ...(input.pipelined && !intent ? { maximumSideMeters: TEMPLATE_DISTRICT_SIDE_METERS } : {}),
       ...(input.maximumAreaSquareMeters !== undefined ? { maximumAreaSquareMeters: input.maximumAreaSquareMeters } : {}),
       ...(rectangles ? { rectangles } : {}) });
     // 攻略 (user-approved 2026-10-05): once high density is unlocked, new homes are laid around the passenger station, where the train sets the
@@ -1930,6 +2184,26 @@ export class DistrictBuilder {
         continue;
       }
       let result = await this.#buildDistrict(plan, role, input, notes, world);
+      // The player paused in the middle of it: what stands is kept as it is (never pruned, never marked refused); the frontage sweep zones its streets later.
+      if (signal?.aborted) {
+        notes.push(`district (${plan.site.anchor.x.toFixed(0)},${plan.site.anchor.z.toFixed(0)}): paused by the player after ${result.roadsLanded} street(s); kept as it stands`);
+        if (result.roadsLanded > 0) {
+          this.#zoned.push({ role, rect: { minX: site.anchor.x, minZ: site.anchor.z, maxX: site.anchor.x + site.widthMeters, maxZ: site.anchor.z + site.heightMeters } });
+          this.#frontageDirty = true;
+        }
+        return { ...result, outcome: "WAIT", waitReason: "PAUSED_BY_PLAYER" };
+      }
+      // The spending fuse stopped it: the site is not the cause, so it is neither refused nor pruned nor tried by another way in (each try would show its preview
+      // again). What stands of it is zoned by the frontage sweep; the rest is laid when the cash is back.
+      if (this.#fundsRefused) {
+        notes.push(`district (${plan.site.anchor.x.toFixed(0)},${plan.site.anchor.z.toFixed(0)}): the spending fuse refused a street (${result.roadsLanded} laid); the rest waits for the cash`);
+        if (result.roadsLanded > 0) {
+          this.#zoned.push({ role, rect: { minX: site.anchor.x, minZ: site.anchor.z, maxX: site.anchor.x + site.widthMeters, maxZ: site.anchor.z + site.heightMeters } });
+          this.#frontageDirty = true;
+          return result;
+        }
+        return { ...wait("FUNDS_REFILLING"), notes };
+      }
       // The way in was refused before anything was laid: the site keeps its other ways in (the next-shortest entrances the survey found). Each is
       // put to the game's dry run, and the first it certifies is laid with the district re-planned around it. Measured live 2026-10-06 (13.9k city):
       // four sites in a row were lost to an "overlap" refusal of the shortest entrance alone.
@@ -1962,6 +2236,7 @@ export class DistrictBuilder {
         continue;
       }
       const facilities = await this.#provideUtilities(site, input, listed.length, notes);
+      this.#noteSupply("LAY", role, result.zonesPainted + (result.zonesDeferred ?? 0));
       this.#boughtTileUnused = false;
       if (role === "residential" && input.pipelined) {
         const area = site.widthMeters * site.heightMeters;
@@ -2081,7 +2356,7 @@ export class DistrictBuilder {
   /** The first of the candidate tiles worth its upkeep (within a gateway's reach, mostly buildable) is bought; the game's own refusal ends the try. */
   async #purchaseNextTile(candidates: readonly SpatialPoint2[], tileSide: number, served: readonly SpatialPoint2[], notes: string[], signal?: AbortSignal):
     Promise<"BOUGHT" | "REFUSED" | "NONE"> {
-    if (!this.port.purchaseTile) return "NONE";
+    if (!this.port.purchaseTile || this.#fundsRefused) return "NONE";
     for (const point of candidates.slice(0, 4)) {
       const reach = served.length === 0 ? 0 : Math.min(...served.map((node) => length(node, point))) - tileSide / 2;
       if (reach > MAXIMUM_GATEWAY_METERS) {
@@ -2120,7 +2395,7 @@ export class DistrictBuilder {
     // The free land "within reach" counts ground across water too; a site refused because its way in crosses water says that land is not reached.
     const wayInRefused = this.#gatewayGroundRefused;
     this.#gatewayGroundRefused = false;
-    if (!input.pipelined || input.intent || this.#cutSpending || (reachableHectares >= LAND_AHEAD_FREE_HECTARES && !wayInRefused)) return false;
+    if (!input.pipelined || input.intent || this.#cutSpending || this.#fundsRefused || (reachableHectares >= LAND_AHEAD_FREE_HECTARES && !wayInRefused)) return false;
     if (input.finance && input.finance.treasury < BRIDGE_MINIMUM_TREASURY) return false;
     const terrain = this.#ground?.terrain;
     if (!terrain || servedNodes.length === 0) return false;
@@ -2172,7 +2447,7 @@ export class DistrictBuilder {
    */
   async #sellPower(world: Pick<SpatialWorldModel, "roadGraph" | "ownedTiles">, input: DistrictCycleInput, notes: string[]): Promise<void> {
     // Selling earns: it runs while outward spending is cut and in the care-only cycles (financial recovery, expansion held) too.
-    if (!this.port.powerExport) return;
+    if (!this.port.powerExport || this.#fundsRefused) return;
     if (input.finance && input.finance.treasury < POWER_EXPORT_MINIMUM_TREASURY) return;
     const stamp = this.#stamp(this.#cycles);
     if (this.#powerExportAt && !stampElapsed(this.#powerExportAt, stamp, POWER_EXPORT_REVIEW_HOURS, POWER_EXPORT_REVIEW_CYCLES)) return;
@@ -2194,6 +2469,7 @@ export class DistrictBuilder {
    */
   async #linkTrain(world: Pick<SpatialWorldModel, "roadGraph" | "ownedTiles">, input: DistrictCycleInput, notes: string[]): Promise<void> {
     const port = this.port.trainLink;
+    if (this.#fundsRefused) return;
     // A station carries nobody without a line: once one stands, the passenger loop platform -> outside connection -> platform is made (and only read
     // back afterwards: the world shows it stands). Looked at on the train cadence; a refused line is tried again on the next look.
     if (this.#trainLinked && this.port.transit && !this.#trainLoopStands) {
@@ -2283,16 +2559,37 @@ export class DistrictBuilder {
    * dezoned each pass: only a spot whose empty zoning (at least STALE_MINIMUM_EMPTY_IN_DISK cells) is that use and nothing else, written through the
    * usual fresh-read admission, which cuts the brush back clear of every building and occupied cell. Never a use that is not over-supplied; never homes.
    */
-  async #withdrawStaleZoning(world: Pick<SpatialWorldModel, "roadGraph">, input: DistrictCycleInput, notes: string[]): Promise<void> {
+  async #withdrawStaleZoning(world: Pick<SpatialWorldModel, "roadGraph">, input: DistrictCycleInput, notes: string[], landUse?: DistrictLandUse): Promise<void> {
     const read = this.port.readZoningAround;
     if (!read || !input.pipelined) return;
     const signal = input.signal;
     const stamp = this.#stamp(this.#cycles);
-    if (this.#staleReviewAt && !stampElapsed(this.#staleReviewAt, stamp, STALE_REVIEW_HOURS, STALE_REVIEW_CYCLES)) return;
     const over: string[] = (["commercial", "office"] as const).filter((category) => {
       const { zoned, empty } = this.#mix.cells[category];
       return zoned > 0 && empty >= STALE_MINIMUM_EMPTY_CELLS && empty / zoned >= STALE_EMPTY_SHARE;
     });
+    // Homes are what the city lacks and a density is open for them: the stale shops and offices become homes, at once and in quantity — zoning costs
+    // nothing, the streets are there, and the game asks for the homes (live 2026-10-08: 16,700 empty shop and office cells beside a full housing stock).
+    const homesZone = this.#homesWanted() && this.#chosenDensity && this.#zoningUses().includes("residential")
+      ? input.zoneFor("residential", this.#chosenDensity) : null;
+    // Empty industry the game does not ask for (its building demand nil) is stock too; it becomes homes only where the homes keep their distance from every
+    // factory and every district laid as industrial (the keep-away of `#repaintStaleAsHomes`), so a planned industrial district stays industrial.
+    const industry = this.#mix.cells.industrial;
+    const staleIndustry = input.demand.industrial <= 0 && industry.zoned > 0 && industry.empty >= STALE_MINIMUM_EMPTY_CELLS && industry.empty / industry.zoned >= STALE_EMPTY_SHARE;
+    // Medium homes standing empty while the game wants none of them (its building demand nil: built medium homes stand unlet) become low-density homes when low
+    // density is what is being laid (live 2026-10-08: 14,345 of 22,176 medium cells empty, medium demand 0 with EmptyBuildings -183, low demand 100 and its new
+    // zoning filled within minutes).
+    const mediumRow = this.#mix.residentialByDensity?.medium;
+    const staleMedium = this.#chosenDensity === "LOW" && !!mediumRow && mediumRow.zoned > 0 && mediumRow.empty >= STALE_MINIMUM_EMPTY_CELLS &&
+      mediumRow.empty / mediumRow.zoned >= STALE_MEDIUM_EMPTY_SHARE && (mediumRow.demand ?? 0) <= 0;
+    const toHomes = [...over, ...(staleIndustry ? ["industrial"] : []), ...(staleMedium ? ["medium homes"] : [])];
+    if (homesZone && toHomes.length > 0 && landUse) {
+      if (this.#staleHomesAt && !stampElapsed(this.#staleHomesAt, stamp, STALE_HOMES_REVIEW_HOURS, STALE_HOMES_REVIEW_CYCLES)) return;
+      this.#staleHomesAt = stamp;
+      await this.#repaintStaleAsHomes(world, toHomes, homesZone, landUse, notes, signal);
+      return;
+    }
+    if (this.#staleReviewAt && !stampElapsed(this.#staleReviewAt, stamp, STALE_REVIEW_HOURS, STALE_REVIEW_CYCLES)) return;
     // Medium and mixed homes too, once their own zoning stands this empty: it is what holds the game's demand for them at nil (EmptyBuildings), and with
     // low density over its quota and high density locked, the city has no other home to lay. Low-density zoning is never withdrawn.
     const medium = this.#mix.residentialByDensity?.medium;
@@ -2335,6 +2632,78 @@ export class DistrictBuilder {
     const outcome = await this.#admitAndWrite(brushes, signal);
     notes.push(`stale zoning (P3): ${over.join(", ")} stand over their empty share: ` +
       `${outcome.written.length} free spot(s) dezoned (${outcome.dropped.length} dropped by the fresh-read admission, ${outcome.failed.length} refused)`);
+    if (outcome.written.length > 0) this.#frontageDirty = true;
+  }
+
+  #taxReviewAt: GameStamp | null = null;
+
+  /**
+   * The tax lever of the jobs side (V2 candidate P4: taxes are a lever on the jobs side — shops, industry, offices — never on homes; the video author's own homes
+   * tax cut "did not have the effect expected"). Where the game's own demand factor "Taxes" says the rate of a job-bearing land use suppresses its demand, that
+   * rate comes down one point, at most one point per `TAX_REVIEW_HOURS` game hours, never under `TAX_LOWER_FLOOR` percent, and only while the books are in the
+   * black (a city losing money is the finance recovery's, which raises where the factor is neutral — the two meet at "neutral" and cannot chase each other).
+   */
+  async #taxLever(input: DistrictCycleInput, notes: string[]): Promise<void> {
+    const taxes = this.port.taxes;
+    if (!taxes || !input.pipelined || process.env.AI_MAYOR_ALLOW_ECONOMY === "0" || !input.finance || input.finance.monthlyBalance <= 0 || this.#fundsRefused) return;
+    const stamp = this.#stamp(this.#cycles);
+    if (this.#taxReviewAt && !stampElapsed(this.#taxReviewAt, stamp, TAX_REVIEW_HOURS, TAX_REVIEW_CYCLES)) return;
+    this.#taxReviewAt = stamp;
+    const reading = await taxes.read(input.signal).catch(() => null);
+    if (!reading) return;
+    const worst = (Object.entries(reading) as Array<["Commercial" | "Industrial" | "Office", { rate: number; penalty: number }]>)
+      .filter(([, row]) => row.penalty < 0 && row.rate > TAX_LOWER_FLOOR).sort((left, right) => left[1].penalty - right[1].penalty)[0];
+    if (!worst) return;
+    const [area, row] = worst;
+    const ok = await taxes.set(area, row.rate - 1, input.signal).catch(() => false);
+    notes.push(`tax: the game says the ${area.toLowerCase()} tax (${row.rate}%) holds its demand down (factor ${row.penalty}); ${ok ? `lowered to ${row.rate - 1}%` : "the game refused the change"}`);
+  }
+
+  #staleHomesAt: GameStamp | null = null;
+  #staleHomesCursor = 0;
+
+  /**
+   * Stale shop and office zoning repainted as homes, street by street: a spot every `STALE_HOMES_SPOT_STEP_METERS` along each side of every street, read, and
+   * repainted when its disk holds only empty zoning of the stale uses (never a building, never another use's empty zoning) and it keeps the homes' distance from
+   * industry, railways and highways. Each brush is admitted against a fresh read of the ground like every zoning write.
+   */
+  async #repaintStaleAsHomes(world: Pick<SpatialWorldModel, "roadGraph">, over: readonly string[], zone: string, landUse: DistrictLandUse, notes: string[], signal?: AbortSignal): Promise<void> {
+    const read = this.port.readZoningAround!;
+    const pattern = new RegExp(over.map((category) => (category === "commercial" ? "Commercial" : category === "industrial" ? "Industrial" : category === "medium homes" ? "Residential Medium|Medium Row|Mixed" : "Office")).join("|"), "i");
+    const homesAway = { points: landUse.polluters, meters: this.#homeBuffer(), also: [{ points: landUse.loud ?? [], meters: RESIDENTIAL_LOUD_BUFFER_METERS }] };
+    const spots: SpatialPoint2[] = [];
+    for (const edge of mainStreetNetwork(world.roadGraph).edges) {
+      const span = length(edge.start, edge.end);
+      if (span < 30) continue;
+      const dx = (edge.end.x - edge.start.x) / span; const dz = (edge.end.z - edge.start.z) / span;
+      for (let along = STALE_HOMES_SPOT_STEP_METERS / 2; along < span; along += STALE_HOMES_SPOT_STEP_METERS) {
+        for (const side of [1, -1]) {
+          const spot = { x: edge.start.x + dx * along - dz * STALE_SPOT_OFFSET_METERS * side, z: edge.start.z + dz * along + dx * STALE_SPOT_OFFSET_METERS * side };
+          if (!keepAwayBlocks(homesAway, (point) => length(point, spot))) spots.push(spot);
+        }
+      }
+    }
+    if (spots.length === 0) return;
+    const brushes: ZoningBrush[] = [];
+    let looked = 0;
+    for (let step = 0; step < Math.min(spots.length, STALE_HOMES_SPOTS_READ_PER_PASS) && brushes.length < STALE_HOMES_BRUSHES_PER_PASS; step += 1) {
+      if (signal?.aborted) break;
+      const spot = spots[(this.#staleHomesCursor + step) % spots.length]!;
+      looked += 1;
+      if (brushes.some((brush) => length(brush.center, spot) < STALE_HOMES_BRUSH_RADIUS_METERS)) continue;
+      const rows = await read(spot, STALE_HOMES_BRUSH_RADIUS_METERS, signal);
+      if (!rows || rows.length === 0) continue;
+      const staleEmpty = rows.filter((row) => pattern.test(row.zone)).reduce((sum, row) => sum + row.empty, 0);
+      // Empty zoning of the very zone being painted is no obstacle (live 2026-10-08: medium rows beside empty low homes, 1 spot of 120 repainted).
+      const otherEmpty = rows.filter((row) => !pattern.test(row.zone) && row.zone !== zone).reduce((sum, row) => sum + row.empty, 0);
+      if (staleEmpty >= STALE_MINIMUM_EMPTY_IN_DISK && otherEmpty === 0) brushes.push({ zone, center: spot, radius: STALE_HOMES_BRUSH_RADIUS_METERS });
+    }
+    this.#staleHomesCursor = (this.#staleHomesCursor + looked) % Math.max(1, spots.length);
+    if (brushes.length === 0) { notes.push(`stale zoning: ${over.join(" and ")} stand mostly empty while homes are short; ${looked} spots looked at, none is wholly empty of them`); return; }
+    const outcome = await this.#admitAndWrite(brushes, signal);
+    this.#noteSupply("ZONE", "residential", outcome.written.length);
+    notes.push(`stale zoning: ${over.join(" and ")} stand mostly empty while homes are short — ${outcome.written.length} spot(s) repainted as homes ` +
+      `(${looked} looked at; ${outcome.dropped.length} dropped by the fresh-read admission, ${outcome.failed.length} refused)`);
     if (outcome.written.length > 0) this.#frontageDirty = true;
   }
 
@@ -2406,7 +2775,7 @@ export class DistrictBuilder {
    */
   async #placeSignatures(world: Pick<SpatialWorldModel, "roadGraph" | "ownedTiles">, input: DistrictCycleInput, notes: string[]): Promise<void> {
     const utilities = this.port.utilities;
-    if (!input.pipelined || this.#cutSpending || !this.port.findPrefabs || !utilities) return;
+    if (!input.pipelined || this.#cutSpending || this.#fundsRefused || !this.port.findPrefabs || !utilities) return;
     const signal = input.signal;
     // Speed: one catalogue read per SIGNATURE_LOOK_HOURS of game time (an unlock is rare and raises its own popup), and a signature once seen
     // standing is never listed again — the cycle pays nothing for this step between unlocks.
@@ -2505,24 +2874,29 @@ export class DistrictBuilder {
   async #buyLandAhead(world: Pick<SpatialWorldModel, "roadGraph" | "ownedTiles">, input: DistrictCycleInput, freeHectares: number, notes: string[], signal?: AbortSignal): Promise<boolean> {
     this.#boughtAheadThisCycle = false;
     const snowball = this.#snowball();
-    if (!input.pipelined || !input.finance || !input.mayPurchaseLand || !this.port.purchaseTile || input.intent || this.#cutSpending || (this.#boughtTileUnused && !snowball)) return false;
-    // Snowball keeps twice the free land in hand, so a batch the cash pays for is never short of ground — but only while districts are being laid: land bought
-    // while nothing can be built on what is owned only adds upkeep (live 2026-10-08: tiles bought beside land the roads could not reach).
-    if (freeHectares >= LAND_AHEAD_FREE_HECTARES * (snowball ? 2 : 1)) return false;
+    if (!input.pipelined || !input.finance || !input.mayPurchaseLand || !this.port.purchaseTile || input.intent || this.#cutSpending || this.#fundsRefused || (this.#boughtTileUnused && !snowball)) return false;
+    // Snowball keeps the land for a few template districts in hand (they are laid at the pace the city fills them, not all at once) — and only while districts
+    // are being laid: land bought while nothing can be built on what is owned only adds upkeep (live 2026-10-08: tiles bought beside land the roads could not
+    // reach; and, with paced districts, two tiles for 123,000 bought beside 140 ha of free land, taking the treasury from 322,000 to 27,000).
+    const aheadHectares = snowball ? SNOWBALL_LAND_AHEAD_TEMPLATES * TEMPLATE_DISTRICT_SQUARE_METERS / 10_000 : LAND_AHEAD_FREE_HECTARES;
+    if (freeHectares >= aheadHectares) return false;
     if (snowball && (!this.#lastBuiltAt || stampElapsed(this.#lastBuiltAt, this.#stamp(this.#cycles), SNOWBALL_LAND_AHEAD_AFTER_BUILD_HOURS, SNOWBALL_LAND_AHEAD_AFTER_BUILD_CYCLES))) return false;
     if (!this.#landForHighDensity(input)) return false;
     const stamp = this.#stamp(this.#cycles);
     if (this.#landAheadRefusedAt && !stampElapsed(this.#landAheadRefusedAt, stamp, LAND_AHEAD_RETRY_HOURS, LAND_AHEAD_RETRY_CYCLES)) return false;
     const owned = world.ownedTiles.filter((tile) => tile.owned).length;
     const costs = this.#costs;
-    const affordable = input.finance.treasury >= LAND_PURCHASE_CASH_RESERVE && (snowball || landPurchaseRunwayAffordable({ ...input.finance, ownedTiles: owned, tileUpkeep: costs?.tileUpkeep ?? null,
+    // Land ahead of need is bought only out of cash the districts do not need: after the tile, the batch reserve and one template district must still stand.
+    const tilePrice = this.#tileCostSeen ?? LAND_AHEAD_TILE_PRICE_ESTIMATE;
+    const spare = input.finance.treasury - capitalReserve(costs?.monthlyExpenses ?? null, plannerSpendFloor(input.finance)) - TEMPLATE_DISTRICT_SQUARE_METERS * COST_PER_SQUARE_METER;
+    const affordable = input.finance.treasury >= LAND_PURCHASE_CASH_RESERVE && spare >= tilePrice && (snowball || landPurchaseRunwayAffordable({ ...input.finance, ownedTiles: owned, tileUpkeep: costs?.tileUpkeep ?? null,
       monthlyExpenses: costs?.monthlyExpenses ?? null, observedMarginalUpkeep: this.#observedMarginalTileUpkeep, requiredCash: expansionCashRequired(input.finance.monthlyBalance) }));
     if (!affordable) return false;
     const tiles = world.ownedTiles.filter((tile) => tile.owned && tile.bounds);
     if (tiles.length === 0) return false;
     const tileSide = Math.min(...tiles.map((tile) => tile.bounds!.max.x - tile.bounds!.min.x));
     const served = mainStreetNetwork(world.roadGraph).nodes.map((node) => ({ x: node.position.x, z: node.position.z }));
-    notes.push(`land ahead (P5): ${Math.round(freeHectares)} ha of reachable owned land stand free (below ${LAND_AHEAD_FREE_HECTARES * (snowball ? 2 : 1)}) and the cash (${Math.round(input.finance.treasury)}) carries the new tile's upkeep for ${LAND_ESCAPE_RUNWAY_MONTHS} months: a tile is bought ahead of need`);
+    notes.push(`land ahead (P5): ${Math.round(freeHectares)} ha of reachable owned land stand free (below ${Math.round(aheadHectares)}) and the cash (${Math.round(input.finance.treasury)}) carries the new tile's upkeep for ${LAND_ESCAPE_RUNWAY_MONTHS} months: a tile is bought ahead of need`);
     // With high density laid around the station, land is bought toward it too.
     const station = this.#highDensityStation(input);
     const candidates = station ? nearestFirst(nextTileCandidates(world), station, (point) => point) : nextTileCandidates(world);
@@ -2605,13 +2979,25 @@ export class DistrictBuilder {
    * the network route between them is much longer than the straight line (see `district-corridors.ts`). A few per cycle.
    */
   async linkDistricts(world: Pick<SpatialWorldModel, "roadGraph">, buildings: readonly SpatialPoint2[], notes: string[], signal?: AbortSignal): Promise<number> {
+    if (this.#fundsRefused) return 0;
     const network = mainStreetNetwork(world.roadGraph);
+    const now = this.#stamp(this.#serviceCycle);
     let built = 0;
     for (const corridor of corridorCandidates({ nodes: network.nodes, edges: network.edges, buildings })) {
-      if (signal?.aborted) break;
+      if (signal?.aborted || this.#fundsRefused) break;
+      // A corridor the game itself refused is not asked again for a game day (its preview flashed every cycle for 45 minutes, live 2026-10-08).
+      const corridorKey = `${Math.round(corridor.from.x)},${Math.round(corridor.from.z)}>${Math.round(corridor.to.x)},${Math.round(corridor.to.z)}`;
+      const refusals = this.#corridorRefusals.get(corridorKey);
+      if (refusals && refusals.count >= CORRIDOR_MAXIMUM_REFUSALS && !stampElapsed(refusals.at, now, CORRIDOR_RETRY_HOURS, CORRIDOR_RETRY_CYCLES)) continue;
       const outcome = await this.#buildOwned({ start: corridor.from, end: corridor.to }, DISTRICT_ROAD_PREFAB, signal);
       notes.push(`through street ${corridor.straightMeters.toFixed(0)} m joint to joint (the network route was ${corridor.networkMeters.toFixed(0)} m): ${outcome.ok ? "built" : `refused ${outcome.detail.slice(0, 80)}`}`);
-      if (outcome.ok) built += 1;
+      if (outcome.ok) { built += 1; this.#corridorRefusals.delete(corridorKey); }
+      // The fuse's refusal is about the money, not the corridor: it does not count against it.
+      else if (!isSpendRefusal(outcome.detail)) {
+        const count = refusals && !stampElapsed(refusals.at, now, CORRIDOR_RETRY_HOURS, CORRIDOR_RETRY_CYCLES) ? refusals.count + 1 : 1;
+        this.#corridorRefusals.set(corridorKey, { count, at: now });
+        if (count >= CORRIDOR_MAXIMUM_REFUSALS) notes.push(`through street (${corridorKey}): refused by the game ${count} times; left alone for ${CORRIDOR_RETRY_HOURS} game hours`);
+      }
     }
     return built;
   }
@@ -2626,6 +3012,7 @@ export class DistrictBuilder {
    * neighbouring streets that had not settled yet.
    */
   async closeDeadEnds(world: Pick<SpatialWorldModel, "roadGraph">, buildings: readonly SpatialPoint2[], notes: string[], signal?: AbortSignal): Promise<number> {
+    if (this.#fundsRefused) return 0;
     const network = mainStreetNetwork(world.roadGraph);
     await this.#readClock(signal);
     const now = this.#stamp(this.#serviceCycle);
@@ -2636,7 +3023,7 @@ export class DistrictBuilder {
     const any = process.env.AI_MAYOR_KEEP_ROADS === "1" ? [] : deadEndClosures({ nodes: network.nodes, edges: network.edges, buildings, isOwn: () => true, anyHeading: true,
       maximumMeters: DEAD_END_CONNECT_MAXIMUM_METERS, limit: 2 }).filter((gap) => !own.some((mine) => Math.hypot(mine.from.x - gap.from.x, mine.from.z - gap.from.z) < 1));
     for (const gap of [...own, ...any]) {
-      if (signal?.aborted) break;
+      if (signal?.aborted || this.#fundsRefused) break;
       const gapKey = `${Math.round(gap.from.x)},${Math.round(gap.from.z)}>${Math.round(gap.to.x)},${Math.round(gap.to.z)}`;
       const tried = this.#closureAttempts.get(gapKey);
       if (tried && (tried.count >= DEAD_END_CLOSURE_MAX_ATTEMPTS || !stampElapsed(tried.at, now, DEAD_END_CLOSURE_RETRY_HOURS, DEAD_END_CLOSURE_RETRY_CYCLES))) continue;
@@ -2652,6 +3039,8 @@ export class DistrictBuilder {
       const outcome = await this.#buildOwned(course, DISTRICT_ROAD_PREFAB, signal);
       notes.push(`dead end (${gap.from.x.toFixed(0)},${gap.from.z.toFixed(0)}) closed by a ${gap.straightMeters.toFixed(0)} m street (the way round was ${Number.isFinite(gap.networkMeters) ? `${gap.networkMeters.toFixed(0)} m` : "none"}): ${outcome.ok ? "built" : `refused ${outcome.detail.slice(0, 80)}; attempt ${attempt.count} of ${DEAD_END_CLOSURE_MAX_ATTEMPTS}`}`);
       if (outcome.ok) { closed += 1; this.#closureAttempts.delete(gapKey); }
+      // The money, not the gap: the try is not counted against it.
+      else if (isSpendRefusal(outcome.detail)) { if (tried) this.#closureAttempts.set(gapKey, tried); else this.#closureAttempts.delete(gapKey); }
     }
     return closed;
   }
@@ -2665,6 +3054,8 @@ export class DistrictBuilder {
   #unreachableDemolished = 0;
   /** The burning and recycling plants were looked for in the development tree once this process (a node bought resets nothing: the unlocked list is read again). */
   #garbagePlantsAsked = false;
+  /** The college / university whose development node was asked for (once each; asked again when the points were short). */
+  readonly #educationUnlockAsked = new Set<string>();
   #treatmentPlantAsked = false;
   /** "Powerline/Pipe Not Connected" notices: tries per spot and when a link was last laid there (the city needs a while to read it). */
   readonly #linkAttempts = new Map<string, number>();
@@ -2720,6 +3111,7 @@ export class DistrictBuilder {
     const effort = (spot: { x: number; z: number }) => { const key = `${Math.round(spot.x / 20)},${Math.round(spot.z / 20)}`; return (this.#roadAccessFailures.get(key) ?? 0) + (this.#frontageAttempts.get(key) ?? 0); };
     spots.sort((left, right) => effort(left) - effort(right));
     for (const spot of spots) {
+      if (this.#fundsRefused) { notes.push("road access: no money above the spending fuse's floor this cycle; the roads wait for it"); break; }
       if (signal?.aborted || tried >= ROAD_ACCESS_REPAIRS_PER_CYCLE || this.#assist?.exhausted()) { if (tried >= ROAD_ACCESS_REPAIRS_PER_CYCLE) notes.push("road access: this cycle's attempts are used; the rest wait for the next"); break; }
       const cell = `${Math.round(spot.x / 20)},${Math.round(spot.z / 20)}`;
       // A footpath-only street is never laid for a building that also lacks a car road: its driveway then meets the footpath, and every parking place reads "No Car
@@ -2782,7 +3174,7 @@ export class DistrictBuilder {
             this.#roadAccessFailures.delete(cell);
             this.#roadAccessBuiltAt.set(cell, this.#stamp(this.#serviceCycle));
             this.#frontageDirty = true;
-          }
+          } else if (this.#fundsRefused) this.#frontageAttempts.set(cell, Math.max(0, (this.#frontageAttempts.get(cell) ?? 1) - 1));
         }
         continue;
       }
@@ -2854,6 +3246,8 @@ export class DistrictBuilder {
         }
         notes.push(`road access: no road the game accepts to (${Math.round(point.x)},${Math.round(point.z)}) yet (${selection.reasons[0]?.slice(0, 90) ?? "no candidate"})`);
       }
+      // Refused for the money, not for the ground: not a failed try (failed tries end with the facility taken down or given up); tried again when the cash is back.
+      if (this.#fundsRefused) { notes.push("road access: the spending fuse refused the road; it is laid when the cash is back"); break; }
       this.#roadAccessFailures.set(cell, (this.#roadAccessFailures.get(cell) ?? 0) + 1);
     }
     return laid;
@@ -2908,7 +3302,7 @@ export class DistrictBuilder {
     let laid = 0;
     let tried = 0;
     for (const spot of spots) {
-      if (signal?.aborted || tried >= UTILITY_LINK_REPAIRS_PER_CYCLE || this.#assist?.exhausted()) break;
+      if (signal?.aborted || tried >= UTILITY_LINK_REPAIRS_PER_CYCLE || this.#assist?.exhausted() || this.#fundsRefused) break;
       const kind = kindOf(spot.type)!;
       const cell = `${kind}:${Math.round(spot.x / 20)},${Math.round(spot.z / 20)}`;
       const seenAt = this.#linkSeenAt.get(cell);
@@ -2942,7 +3336,7 @@ export class DistrictBuilder {
       const refusals: string[] = [];
       let done = false;
       for (const target of targets.slice(0, UTILITY_LINK_COURSES_PER_SPOT)) {
-        if (signal?.aborted || this.#assist?.exhausted()) break;
+        if (signal?.aborted || this.#assist?.exhausted() || this.#fundsRefused) break;
         const meters = Math.hypot(target.x - from.x, target.z - from.z);
         if (meters < 2) continue;
         this.#assist?.noteWrite();
@@ -2959,6 +3353,8 @@ export class DistrictBuilder {
         }
         refusals.push(outcome.detail.slice(0, 50));
       }
+      // Refused for the money: the try is not counted against the spot.
+      if (!done && this.#fundsRefused) { this.#linkAttempts.set(cell, Math.max(0, (this.#linkAttempts.get(cell) ?? 1) - 1)); notes.push(`utility link: ${prefab} for "${spot.type}" waits for the cash (the spending fuse refused it)`); break; }
       if (!done) notes.push(`utility link: no ${prefab} the game accepts from (${Math.round(from.x)},${Math.round(from.z)}) for "${spot.type}" (${targets.length === 0 ? "no street within reach" : `${Math.min(targets.length, UTILITY_LINK_COURSES_PER_SPOT)} course(s) refused: ${[...new Set(refusals)].slice(0, 2).join("; ")}`})`);
     }
     return laid;
@@ -3088,7 +3484,7 @@ export class DistrictBuilder {
     let placedTotal = 0;
     // What the player asked to be seen to (`care-focus.ts`): a named problem goes first and past the usual waits.
     const focus = new Set(input.care?.focus ?? []);
-    const spend = () => { if (budget.exhausted()) return false; budget.noteWrite(); return true; };
+    const spend = () => { if (budget.exhausted() || this.#fundsRefused) return false; budget.noteWrite(); return true; };
     const roadCare = this.#roadCare;
     const trafficStage = () => budget.stage("traffic", async () => {
       if (!roadCare) { if (focus.has("TRAFFIC")) notes.push("traffic: no road-care port in this build (the game connector lacks the traffic tools)"); return; }
@@ -3104,19 +3500,28 @@ export class DistrictBuilder {
     // How long each need's icons have been up: the evidence that outranks the population figure (`SERVICE_STUCK_HOURS`).
     // A need the player named counts from its first icon, and before the others.
     // Road maintenance's evidence is the worn stretches of jammed corridors, not an icon (`road-care.ts`).
-    const careReading = withWornRoads(reading, roadCare?.wornPlaces ?? []);
+    // Education's evidence is the labour market, not an icon: jobs for the educated standing open (`withEducationGap`), at the heart of the city.
+    const educationGap = (await this.port.readEducationGap?.(signal).catch(() => null)) ?? null;
+    const streetNodes = mainStreetNetwork(world.roadGraph).nodes;
+    const cityHeart = streetNodes.length > 0
+      ? { x: streetNodes.reduce((total, node) => total + node.position.x, 0) / streetNodes.length, z: streetNodes.reduce((total, node) => total + node.position.z, 0) / streetNodes.length } : null;
+    const careReading = withEducationGap(withWornRoads(reading, roadCare?.wornPlaces ?? []), educationGap, cityHeart);
     const wantedNow = servicesWanted(careReading);
     for (const need of SERVICE_NEEDS) {
       if (!focus.has(SERVICE_FOCUS[need]) || wantedNow.some((entry) => entry.need === need)) continue;
       const icons = iconCount(careReading, need);
       if (icons > 0) wantedNow.push({ need, icons });
     }
-    wantedNow.sort((left, right) => Number(focus.has(SERVICE_FOCUS[right.need])) - Number(focus.has(SERVICE_FOCUS[left.need])) || right.icons - left.icons);
+    // The problem icons come first (the player's rule); education, which answers the labour market and not an icon, goes after every need that has one.
+    wantedNow.sort((left, right) => Number(focus.has(SERVICE_FOCUS[right.need])) - Number(focus.has(SERVICE_FOCUS[left.need])) ||
+      Number(left.need === "education") - Number(right.need === "education") || right.icons - left.icons);
     for (const need of SERVICE_NEEDS) if (!wantedNow.some((entry) => entry.need === need)) this.#iconsUpSince.delete(need);
     for (const { need } of wantedNow) if (!this.#iconsUpSince.has(need)) this.#iconsUpSince.set(need, cycleStamp);
     for (const { need, icons } of wantedNow) {
       if (signal?.aborted) break;
       if (budget.exhausted()) { notes.push(`service ${need}: ${evidence(need, icons)}; the assist budget is spent, this waits for the next cycle`); break; }
+      // No lot is looked for (each look shows a ghost building) while the money is under the spending fuse's floor: it would be refused when placed.
+      if (this.#fundsRefused) { notes.push(`service ${need}: ${evidence(need, icons)}; no money above the spending fuse's floor this cycle, the building waits for the cash`); break; }
       const restedAt = this.#serviceRest.get(need);
       const named = focus.has(SERVICE_FOCUS[need]);
       if (!named && restedAt && !stampElapsed(restedAt, cycleStamp, SERVICE_COOLDOWN_HOURS, SERVICE_COOLDOWN_CYCLES)) continue;
@@ -3136,6 +3541,19 @@ export class DistrictBuilder {
       // Garbage piling up while only landfills stand (they fill): the burning and recycling plants are bought with development points, once per look.
       const wantsBetterGarbagePlants = need === "garbage" && icons >= 8 && !prefabs.some((name) => /Recycl/i.test(name)) && !this.#garbagePlantsAsked;
       if (wantsBetterGarbagePlants) this.#garbagePlantsAsked = true;
+      // Education: schools are open from the start; the college is bought with development points only while jobs for the schooled stand open in numbers,
+      // the university once a college stands (a university before the offices exist makes unemployed graduates — community guides).
+      if (need === "education" && educationGap) {
+        const next = educationGap.openHigh >= EDUCATION_COLLEGE_OPEN_JOBS * 2 && prefabs.some((name) => /^College\d+$/.test(name)) && (await utilities.listFacilities("College01", signal)).length > 0 ? "University01"
+          : educationGap.openHigh >= EDUCATION_COLLEGE_OPEN_JOBS && !prefabs.some((name) => /^College\d+$/.test(name)) ? "College01" : null;
+        const unlockedAlready = next !== null && prefabs.some((name) => name === next);
+        if (next && !unlockedAlready && this.port.techTree && !this.#educationUnlockAsked.has(next)) {
+          this.#educationUnlockAsked.add(next);
+          const bought = await unlockPrefabs(this.port.techTree, [{ prefab: next, category: "building" as const }], `the ${next === "College01" ? "college" : "university"}`, notes, undefined, signal);
+          if (bought.status === "BOUGHT") prefabs = servicePrefabs(need, await offeredNow());
+          else if (bought.status === "WAITING_POINTS") this.#educationUnlockAsked.delete(next);
+        }
+      }
       if ((prefabs.length === 0 || wantsBetterGarbagePlants) && unlockable && this.port.techTree) {
         const bought = await unlockPrefabs(this.port.techTree, unlockable.map((prefab) => ({ prefab, category: "building" as const })), `the ${need} service`, notes, undefined, signal);
         if (bought.status === "BOUGHT") prefabs = servicePrefabs(need, await offeredNow());
@@ -3199,13 +3617,14 @@ export class DistrictBuilder {
       let preflights = 0;
       let skippedKnown = 0;
       let noAnswers = 0;
+      let budgetRanOut = false;
       for (const prefab of prefabs) {
-        if (placed || noAnswers >= PREFLIGHT_NO_ANSWER_LIMIT) break;
+        if (placed || budgetRanOut || noAnswers >= PREFLIGHT_NO_ANSWER_LIMIT) break;
         const held = this.#highValue.blocked(prefab, cycleStamp);
         if (held) { this.#highValueRefusals.add(`${prefab}: ${held}`); continue; }
         for (const candidate of candidates) {
           if (signal?.aborted || preflights >= 30) break;
-          if (budget.exhausted()) { notes.push(`service ${need}: the assist budget ran out while looking for a lot; it continues next cycle`); break; }
+          if (budget.exhausted()) { if (!budgetRanOut) notes.push(`service ${need}: the assist budget ran out while looking for a lot; it continues next cycle`); budgetRanOut = true; break; }
           // A spot the game already refused is not offered to it again this while.
           if (this.#refusedPlacements.refused(prefab, candidate.position, cycleStamp, stuck ? SERVICE_STUCK_REFUSAL_HOURS : undefined)) { skippedKnown += 1; continue; }
           if (this.#accessFailedSites.some((zone) => Math.hypot(zone.position.x - candidate.position.x, zone.position.z - candidate.position.z) < zone.radius)) { skippedKnown += 1; continue; }
@@ -3241,7 +3660,11 @@ export class DistrictBuilder {
       }
       // A building too big for any lot beside a street (the road maintenance depot, 80 x 96 m: live 2026-10-06 "no legal lot") is fitted to free land by
       // geometry (`big-building-site.ts`) instead of probed lot by lot.
-      if (!placed && need === "garbage") {
+      // A big building on free land needs its own road after it stands: it is placed only with the cash for both above the fuse's floor (live 2026-10-08: a
+      // cemetery placed with the treasury at the floor never got its road, and every cemetery was then held for 7 game days).
+      const bigAffordable = this.#headroom() >= BIG_SERVICE_MINIMUM_HEADROOM;
+      if (!placed && !bigAffordable) notes.push(`service ${need}: a building on free land waits for ${BIG_SERVICE_MINIMUM_HEADROOM} above the spending fuse's floor (it needs its own road after it)`);
+      if (!placed && bigAffordable && need === "garbage") {
           // Far from homes first; when the grown city leaves no such lot (live 2026-10-07: 27,000 people, 23 garbage icons, "0 sites tried"), a nearer one is
           // taken in steps — garbage piling up hurts the homes more than a landfill 100 m away does.
           for (const buffer of GARBAGE_HOME_BUFFERS_METERS) {
@@ -3254,10 +3677,14 @@ export class DistrictBuilder {
             placed = await this.#placeBigService(utilities, world, input, offered, target, standing, notes, signal, buffer);
             if (placed) break;
           }
-        } else if (!placed) placed = await this.#placeBigService(utilities, world, input, prefabs, target, standing, notes, signal, null);
-      if (!placed && this.options.serviceDemolitionExperiment && (!this.#serviceDemolishedAt || stampElapsed(this.#serviceDemolishedAt, cycleStamp, BIG_SERVICE_CLEAR_COOLDOWN_HOURS, BIG_SERVICE_CLEAR_COOLDOWN_CYCLES))) {
+        } else if (!placed && bigAffordable) placed = await this.#placeBigService(utilities, world, input, prefabs, target, standing, notes, signal, null);
+      // A home is taken down only for a service that can stand on its lot, that is not held back, and that the money can pay for now: otherwise the home is
+      // lost for nothing (live 2026-10-08: 11 homes bulldozed for a cemetery that was held and never fits a house lot).
+      const lotSized = prefabs.filter((prefab) => !BIG_SERVICE_PREFAB.test(prefab) && !this.#highValue.blocked(prefab, cycleStamp));
+      if (!placed && this.options.serviceDemolitionExperiment && lotSized.length > 0 && !this.#fundsRefused && this.#headroom() >= BIG_SERVICE_MINIMUM_HEADROOM &&
+        (!this.#serviceDemolishedAt || stampElapsed(this.#serviceDemolishedAt, cycleStamp, BIG_SERVICE_CLEAR_COOLDOWN_HOURS, BIG_SERVICE_CLEAR_COOLDOWN_CYCLES))) {
         this.#serviceDemolishedAt = cycleStamp;
-        placed = await this.#demolishHomeForService(utilities, need, prefabs, target, nearestStreet, standing, notes, signal);
+        placed = await this.#demolishHomeForService(utilities, need, lotSized, target, nearestStreet, standing, notes, signal);
       } else if (!placed) {
         notes.push(`service ${need}: ${evidence(need, icons)}, but no legal lot near them (${preflights} sites tried${skippedKnown > 0 ? `, ${skippedKnown} not tried again: refused earlier` : ""})`);
       }
@@ -3420,8 +3847,10 @@ export class DistrictBuilder {
     const by = this.#mix.residentialByDensity;
     if (!input.unlocked) notes.push("density: the catalogue's unlocked densities are not read, so the density policy stands down");
     else {
+      // A density the governor closed (no demand, or its zoning stands and does not fill, or its supply showed no effect) is read as asked for by nobody.
+      const governorClosed = (key: ResidentialDensityKey) => this.#verdict !== null && !this.#verdict.uses[key].open;
       const stateOf = (key: ResidentialDensityKey): DensityState => ({ unlocked: input.unlocked!.densities[key],
-        vacancyShare: by ? (by[key].zoned > 0 ? by[key].empty / by[key].zoned : 0) : null, demand: by ? by[key].demand : null });
+        vacancyShare: by ? (by[key].zoned > 0 ? by[key].empty / by[key].zoned : 0) : null, demand: governorClosed(key) ? 0 : by ? by[key].demand : null });
       const laid = this.#laidResidential.low + this.#laidResidential.other;
       // The low-density share is the world's: the residential zoning the game reports by density (a restart of this process forgets what it laid).
       const zonedByDensity = by ? by.low.zoned + by.medium.zoned + by.high.zoned : 0;
@@ -3450,16 +3879,34 @@ export class DistrictBuilder {
       notes.push(`absorption (${key}): ${result.detail}${result.cells === null ? "; the batch is not capped by absorption" : ` -> ${Math.round(result.cells)} cells`}`);
       if (result.cells !== null && result.cells <= 0 && !this.#snowball()) paused.push("residential");
     }
-    // Snowball: the batch is what the cash pays for (no absorption cap, no seed).
-    if (this.#snowball()) absorptionCells = null;
+    // Snowball: the batch is what the cash pays for, up to what the city can take up next — the empty zoning it may hold ahead of its people (`snowballPipelineCells`).
+    // A district follows as soon as the last ones fill, so the building never stops, and no district stands empty for an hour (the player's ruling, 2026-10-08:
+    // "laying it all at once is slow, the buildings grow slowly").
+    if (this.#snowball()) {
+      absorptionCells = null;
+      if (!input.intent?.role) {
+        // Homes: the empty zoning of the density being laid (a density left out for its vacancy or its nil demand is not what the city will fill next, and
+        // counting it would hold the open density back for good).
+        const chosen = this.#chosenDensity ? (this.#chosenDensity.toLowerCase() as ResidentialDensityKey) : null;
+        // Zoning held back until the utilities answer is stock too: it is in no reading yet, and without it the pipeline lays district after district of bare
+        // streets while water or power is short (live 2026-10-08, first run of this rule: four districts, every one "0/120 zones, held back").
+        const pending = this.#pendingZoning.filter((brush) => categoryOfZoneName(brush.zone) === role).length * REZONE_CELLS_PER_SPOT;
+        const empty = pending + (role === "residential"
+          ? (by ? (chosen ? by[chosen].empty : by.low.empty + by.medium.empty + by.high.empty) : this.#mix.cells.residential.empty)
+          : this.#mix.cells[role].empty);
+        // Other uses hold one template district ahead, homes two.
+        const pipeline = role === "residential" ? snowballPipelineCells(empty) : { cells: Math.max(0, TEMPLATE_DISTRICT_CELLS - empty), detail: `${empty} ${role} cells stand empty of the ${TEMPLATE_DISTRICT_CELLS} held ahead` };
+        absorptionCells = pipeline.cells;
+        notes.push(`pipeline (${role}): ${pipeline.detail}`);
+      }
+    }
     this.#absorptionCells = absorptionCells;
     // P2 and S0 ("a small, complete first loop"): with nothing to price the batch against — the opening stage, or homes whose immigration rate cannot be
     // read — the batch is a seed, not the cash cap. A player's named request is sized by the cash alone, as before.
     this.#seedBatch = !this.#snowball() && !input.intent?.role && (verdict.stage === "S0" || (role === "residential" && absorptionCells === null));
     this.#seedAlways = !this.#snowball() && !input.intent?.role && verdict.stage === "S0";
     if (input.finance) {
-      this.#batch = batchConstraint({ absorptionCells, seed: this.#seedBatch, seedAlways: this.#seedAlways, capitalArea: capitalAreaCap({ treasury: input.finance.treasury, monthlyBalance: input.finance.monthlyBalance,
-        monthlyMaintenance: this.#costs?.monthlyExpenses ?? null }) });
+      this.#batch = batchConstraint({ absorptionCells, seed: this.#seedBatch, seedAlways: this.#seedAlways, capitalArea: this.#capitalArea(input.finance) });
       notes.push(`batch: ${this.#batch.detail}`);
     } else this.#batch = null;
     return { frozen: false, paused };
@@ -3489,14 +3936,44 @@ export class DistrictBuilder {
     return true;
   }
 
+  /** Buildings the game shows without power, water or sewage now; null when the icons cannot be read. */
+  async #outageIcons(signal?: AbortSignal): Promise<number | null> {
+    try {
+      const reading = await this.port.readIcons?.(signal);
+      if (!reading) return null;
+      return Object.entries(reading.counts).reduce((sum, [type, count]) => sum + (UTILITY_OUTAGE_ICON.test(type) ? Number(count) || 0 : 0), 0);
+    } catch { return null; }
+  }
+
+  /** Square metres the cash pays for now, sized under the spending fuse (its floor, the operating band kept above it, its hourly cap). */
+  #capitalArea(finance: { treasury: number; monthlyBalance: number }): number {
+    return capitalAreaCap({ treasury: finance.treasury, monthlyBalance: finance.monthlyBalance, monthlyMaintenance: this.#costs?.monthlyExpenses ?? null,
+      spendFloor: plannerSpendFloor(finance), hourlyCap: plannerHourlyCap() });
+  }
+
   /** The batch on the treasury as it stands after the loan step; `held` when it is smaller than one district. */
   #withBatch(input: DistrictCycleInput, notes: string[], role: DistrictRole): { input: DistrictCycleInput; held: boolean } {
     if (!input.finance) return { input, held: false };
-    const batch = batchConstraint({ absorptionCells: role === "residential" && !input.intent?.role ? this.#absorptionCells : null, seed: this.#seedBatch, seedAlways: this.#seedAlways,
-      capitalArea: capitalAreaCap({ treasury: input.finance.treasury, monthlyBalance: input.finance.monthlyBalance, monthlyMaintenance: this.#costs?.monthlyExpenses ?? null }) });
+    // Homes are capped by what the city takes up; in snowball every use the policy chose is (its pipeline, `#planGrowth`).
+    const capped = !input.intent?.role && (role === "residential" || this.#snowball());
+    const batch = batchConstraint({ absorptionCells: capped ? this.#absorptionCells : null, seed: this.#seedBatch, seedAlways: this.#seedAlways,
+      capitalArea: this.#capitalArea(input.finance) });
     this.#batch = batch;
     notes.push(`batch (after financing): ${batch.detail}`);
+    // Said plainly when it is the money that holds the next district (the player sees a city that waits, and should read why).
+    const floor = plannerSpendFloor(input.finance);
+    if (floor !== null && batch.capitalArea < SMALLEST_DISTRICT_SQUARE_METERS) {
+      const needed = floor + operatingReserve(floor) + SMALLEST_DISTRICT_SQUARE_METERS * COST_PER_SQUARE_METER;
+      notes.push(`funds: the next district waits for the cash — treasury ${Math.round(input.finance.treasury)}, a district is laid from ${Math.round(needed)} (the spending fuse's floor ${Math.round(floor)} and ${Math.round(operatingReserve(floor))} kept for repairs)`);
+    }
     let limit = batch.limit;
+    // An IDLE stall (`growth-governor.ts`): nothing was done and nothing moved for a whole window. If the wait is the pipeline's own (the cash would pay), one
+    // template district goes past it — a wait that does not end is the dead loop the governor exists to break.
+    if (limit < SMALLEST_DISTRICT_SQUARE_METERS && this.#verdict?.forceOne && capped && batch.binding === "absorption" && batch.capitalArea >= SMALLEST_DISTRICT_SQUARE_METERS) {
+      limit = Math.min(batch.capitalArea, TEMPLATE_DISTRICT_SQUARE_METERS);
+      this.#governor.forced(this.#stamp(this.#cycles));
+      notes.push("governor: the city stalled with nothing done for a whole window; one district is laid past the pipeline's wait");
+    }
     if (input.nearTarget && role === "residential") {
       const remaining = Math.max(0, input.nearTarget.target - input.nearTarget.population);
       const room = remaining * NEAR_TARGET_SQUARE_METERS_PER_PERSON;
@@ -3506,6 +3983,24 @@ export class DistrictBuilder {
       }
     }
     return { input: { ...input, maximumAreaSquareMeters: limit }, held: limit < SMALLEST_DISTRICT_SQUARE_METERS };
+  }
+
+  /** Homes are what the city lacks: housing is the labour bottleneck, or nothing is and the game asks for homes (demand ≥ 50 at some density). */
+  #homesWanted(): boolean {
+    if (this.#bottleneck === "HOUSING") return true;
+    if (this.#bottleneck !== "NONE") return false;
+    const by = this.#mix.residentialByDensity;
+    const demand = by ? Math.max(...(["low", "medium", "high"] as const).map((key) => by[key].demand ?? 0)) : this.#mix.demand.residential;
+    return demand >= 50;
+  }
+
+  /**
+   * The land uses new zoning may take this cycle: what the game has unlocked, the cycle did not pause (the governor pauses a use the game has no building
+   * demand for, or whose zoning does not fill — live 2026-10-08: 9,839 of 10,289 office cells empty), and whose zoning the governor did not suspend.
+   * Before the governor read the outcome, offices were held to a jobs bottleneck; the governor's demand-and-fill test now decides them like every use.
+   */
+  #zoningUses(): ZoneCategory[] {
+    return this.#available.filter((category) => !this.#paused.includes(category) && !this.#governorHolds("ZONE", category));
   }
 
   /** The density a zone is laid at: the player's asked density rules; otherwise, for homes in FAST_EXPANSION, the density this cycle chose. */
@@ -3793,7 +4288,7 @@ export class DistrictBuilder {
     const network = mainStreetNetwork(world.roadGraph);
     let joined = 0;
     for (const orphan of network.components.filter((component) => component !== network.main)) {
-      if (signal?.aborted) break;
+      if (signal?.aborted || this.#fundsRefused) break;
       const streets = orphan.edges.filter((edge) => !NOT_A_CITY_STREET.test(edge.prefab));
       if (streets.length < ORPHAN_STUB_MAXIMUM_STREETS + 1) continue; // stubs are removed, not joined
       const orphanNodes = new Set(streets.flatMap((edge) => [key(edge.startNode), key(edge.endNode)]));
@@ -3871,7 +4366,8 @@ export class DistrictBuilder {
       }
     }
     const mix = this.#mix;
-    const deficits = mixDeficits(mix, this.#available);
+    const uses = this.#zoningUses();
+    const deficits = mixDeficits(mix, uses);
     // Shops go nearest the junctions, where customers and traffic meet; homes take what is left inside.
     const junctions = mainStreetNetwork(world.roadGraph).nodes
       .filter((node) => node.roadDegree >= 3).map((node) => ({ x: node.position.x, z: node.position.z }));
@@ -3884,7 +4380,13 @@ export class DistrictBuilder {
     const homesAway = { points: landUse.polluters, meters: this.#homeBuffer(), also: [{ points: landUse.loud ?? [], meters: RESIDENTIAL_LOUD_BUFFER_METERS }] };
     const industryAway = { points: landUse.sensitive, meters: INDUSTRIAL_RESIDENTIAL_BUFFER_METERS };
     // A lot kept open for a public service is not "unzoned frontage" to be filled in.
-    const freshSpots = toSpots(fresh).filter((spot) => !this.#reservedLots.some((lot) => Math.hypot(spot.point.x - lot.center.x, spot.point.z - lot.center.z) < lot.radius));
+    // An industrial cycle zones industry only inside the districts laid as industrial: the frontage of the rest of the city (homes' streets, a housing district
+    // whose zoning waited for the utilities) is left for the uses it was laid for (live 2026-10-08: 78 spots of new housing districts zoned industrial).
+    const industrialRects = this.#zoned.filter((district) => district.role === "industrial").map((district) => district.rect);
+    const inIndustrialDistrict = (point: SpatialPoint2) => industrialRects.some((rect) => point.x >= rect.minX - DISTRICT_CLEARANCE_METERS && point.x <= rect.maxX + DISTRICT_CLEARANCE_METERS &&
+      point.z >= rect.minZ - DISTRICT_CLEARANCE_METERS && point.z <= rect.maxZ + DISTRICT_CLEARANCE_METERS);
+    const freshSpots = toSpots(fresh).filter((spot) => !this.#reservedLots.some((lot) => Math.hypot(spot.point.x - lot.center.x, spot.point.z - lot.center.z) < lot.radius))
+      .filter((spot) => role !== "industrial" || inIndustrialDistrict(spot.point));
     const painted: Record<string, number> = {};
     // `total` is the spot budget spent (brushes planned); `written` is what the world accepted.
     let total = 0;
@@ -3922,7 +4424,7 @@ export class DistrictBuilder {
       if (admission.unread.length > 0) this.#frontageDirty = true;
     };
     // 1. Fresh frontage: split by the world-corrected deficits; the nearest-to-junction spots become shops, then offices.
-    const allowedFresh: ZoneCategory[] = (role === "industrial" ? ["industrial"] as ZoneCategory[] : ["residential", "commercial", "office"] as ZoneCategory[]).filter((category) => this.#available.includes(category) && !this.#paused.includes(category));
+    const allowedFresh: ZoneCategory[] = (role === "industrial" ? ["industrial"] as ZoneCategory[] : ["residential", "commercial", "office"] as ZoneCategory[]).filter((category) => uses.includes(category));
     const freshAlloc = allocateByDeficit(freshSpots.length, deficits, allowedFresh);
     let cursor = 0;
     for (const category of ["commercial", "office", "residential", "industrial"] as const) {
@@ -3938,11 +4440,13 @@ export class DistrictBuilder {
     if (rezoneStalled) { this.#rezoneUnsupported = true; notes.push("rezoning empty housing did not reduce it; not repeated"); }
     this.#rezoneBefore = null;
     const zonedTotal = ZONE_CATEGORIES.reduce((sum, category) => sum + mix.cells[category].zoned, 0);
-    if (!this.#rezoneUnsupported && !input.intent?.role && unrealizedShare(mix, "residential") >= REZONE_MINIMUM_UNREALIZED_SHARE && emptyHomes.size > 0) {
+    // Never while homes are what the city lacks (live 2026-10-08: 202 empty housing spots repainted as offices with housing the bottleneck; the offices never grew),
+    // and only into a use whose own zoning is mostly built.
+    if (!this.#rezoneUnsupported && !input.intent?.role && !this.#homesWanted() && unrealizedShare(mix, "residential") >= REZONE_MINIMUM_UNREALIZED_SHARE && emptyHomes.size > 0) {
       const caps = { commercial: Math.max(0, Math.ceil((deficits.commercial * zonedTotal) / REZONE_CELLS_PER_SPOT)), office: Math.max(0, Math.ceil((deficits.office * zonedTotal) / REZONE_CELLS_PER_SPOT)) };
       const spots = toSpots(emptyHomes).filter((spot) => !freshSpots.some((other) => length(other.point, spot.point) < 1));
       const room = Math.max(0, Math.min(spots.length, UNZONED_SPOTS_PER_CYCLE - total, caps.commercial + caps.office, Math.floor(spots.length * REZONE_MAXIMUM_SHARE_OF_EMPTY_HOMES)));
-      const rezoneTo = (["commercial", "office"] as ZoneCategory[]).filter((category) => this.#available.includes(category) && !this.#paused.includes(category));
+      const rezoneTo = (["commercial", "office"] as ZoneCategory[]).filter((category) => uses.includes(category) && unrealizedShare(mix, category) < REZONE_TARGET_MAXIMUM_UNREALIZED_SHARE);
       const alloc = allocateByDeficit(rezoneTo.length === 0 ? 0 : room, deficits, rezoneTo.length === 0 ? ["commercial"] : rezoneTo);
       const counts = { commercial: Math.min(alloc.commercial, caps.commercial), office: Math.min(alloc.office, caps.office) };
       let at = 0;
@@ -3954,7 +4458,8 @@ export class DistrictBuilder {
       if (rezoned > 0) notes.push(`rezoned ${rezoned} empty housing spots (${counts.commercial} commercial, ${counts.office} office)`);
     }
     if (skippedNearBuildings > 0) notes.push(`${skippedNearBuildings} spots left alone: a building stood within the brush`);
-    if (written > 0) notes.push(`zoned ${written} spots: ${Object.entries(painted).map(([category, count]) => `${count} ${category}`).join(", ")}; mix target ${ZONE_CATEGORIES.map((category) => `${category[0]}${Math.round(targetShares(mix, this.#available)[category] * 100)}`).join("/")}`);
+    for (const [category, count] of Object.entries(painted)) this.#noteSupply("ZONE", category as ZoneCategory, count);
+    if (written > 0) notes.push(`zoned ${written} spots: ${Object.entries(painted).map(([category, count]) => `${count} ${category}`).join(", ")}; mix target ${ZONE_CATEGORIES.map((category) => `${category[0]}${Math.round(targetShares(mix, uses)[category] * 100)}`).join("/")}`);
     // The spot budget ran out, or a brush was refused: more may be left for the next cycle.
     if (total >= UNZONED_SPOTS_PER_CYCLE || this.#pendingZoning.length > 0) this.#frontageDirty = true;
     if (!this.#frontageDirty) {
@@ -4213,6 +4718,7 @@ export class DistrictBuilder {
     const port = this.#utilitiesWithAccessCheck();
     const readings = input.utilities;
     if (!port || !readings || buildingCount <= 0) return [];
+    if (this.#fundsRefused) { notes.push("utilities: the district's facilities wait for the cash (the spending fuse refused a write this cycle)"); return []; }
     this.#repairCalls += 1;
     const repairStamp = this.#stamp(this.#repairCalls);
     const zonedCells = districtZonedCells(site.widthMeters, site.heightMeters);
@@ -4300,8 +4806,8 @@ export class DistrictBuilder {
     // stretch): four cycles each laid 2-3 streets there and pruned them again (33-50% stood) — roads that appear and vanish. Each street is still
     // asked again just before it is built (the ring laid first changes what the next one meets).
     if (input.pipelined && this.port.preflightRoad) {
-      const ask = async (course: { start: SpatialPoint2; end: SpatialPoint2 }) => {
-        try { return await this.port.preflightRoad!(course, DISTRICT_ROAD_PREFAB, signal); } catch { return "ERROR"; }
+      const ask = async (course: DistrictCourse) => {
+        try { return await this.port.preflightRoad!(course, districtCoursePrefab(course), signal); } catch { return "ERROR"; }
       };
       let asked = 0;
       let gatewayVerdict: string | null = null;
@@ -4354,7 +4860,7 @@ export class DistrictBuilder {
       if (input.pipelined && this.port.preflightRoad) {
         const startedAt = Date.now();
         let verdict = "ERROR";
-        try { verdict = await this.port.preflightRoad(course, DISTRICT_ROAD_PREFAB, signal); } catch { /* fail open */ }
+        try { verdict = await this.port.preflightRoad(course, districtCoursePrefab(course), signal); } catch { /* fail open */ }
         this.options.outcomes?.annotate({ preflight: verdict });
         if (verdict.startsWith("REJECT")) {
           pipeline.gated += 1;
@@ -4362,7 +4868,7 @@ export class DistrictBuilder {
           pipeline.refused += 1;
           const why = verdict.replace(/^REJECT:/, "");
           pipeline.reasons.set(`dry run: ${why}`, (pipeline.reasons.get(`dry run: ${why}`) ?? 0) + 1);
-          this.options.outcomes?.record({ primitive: "ROAD", context: roadContext(course, DISTRICT_ROAD_PREFAB), ok: false, detail: `GATED ${why}`, latencyMs: Date.now() - startedAt });
+          this.options.outcomes?.record({ primitive: "ROAD", context: roadContext(course, districtCoursePrefab(course)), ok: false, detail: `GATED ${why}`, latencyMs: Date.now() - startedAt });
           notes.push(`${course.id} refused by the dry run: ${why.slice(0, 80)}`);
           if (course.kind === "GATEWAY") { gatewayRefused = true; break; }
           pending.push(...splitCourse(course));
@@ -4372,14 +4878,14 @@ export class DistrictBuilder {
         // Without a dry run: a street the game is certain to refuse is not submitted (the player would see an attempt that cannot succeed).
         pipeline.prefiltered += 1;
         if (this.options.outcomes) {
-          if (this.port.preflightRoad) { try { this.options.outcomes.annotate({ preflight: await this.port.preflightRoad(course, DISTRICT_ROAD_PREFAB, signal) }); } catch { /* diagnostics */ } }
-          this.options.outcomes.record({ primitive: "ROAD", context: roadContext(course, DISTRICT_ROAD_PREFAB), ok: false, detail: "PREFILTERED_STRAIGHT_CONTINUATION", latencyMs: 0 });
+          if (this.port.preflightRoad) { try { this.options.outcomes.annotate({ preflight: await this.port.preflightRoad(course, districtCoursePrefab(course), signal) }); } catch { /* diagnostics */ } }
+          this.options.outcomes.record({ primitive: "ROAD", context: roadContext(course, districtCoursePrefab(course)), ok: false, detail: "PREFILTERED_STRAIGHT_CONTINUATION", latencyMs: 0 });
         }
         notes.push(`${course.id} not submitted: one block straight on from a dead end (the game folds it back)`);
         continue;
       }
       pipeline.submitted += 1;
-      const outcome = await this.#buildOwned(course, DISTRICT_ROAD_PREFAB, signal);
+      const outcome = await this.#buildOwned(course, districtCoursePrefab(course), signal);
       if (outcome.ok) { pipeline.accepted += 1; streets.push({ start: course.start, end: course.end }); }
       if (!outcome.ok) {
         roadsRefused += 1;
@@ -4387,6 +4893,9 @@ export class DistrictBuilder {
         const reason = refusalReason(outcome.detail);
         pipeline.reasons.set(reason, (pipeline.reasons.get(reason) ?? 0) + 1);
         notes.push(`${course.id} refused: ${outcome.detail.match(/"errorType":"([A-Za-z]+)"/g)?.slice(-1)[0] ?? outcome.detail.slice(0, 120)}`);
+        // The money ran out (the spending fuse): nothing more of this district is laid this cycle. Its streets that stand are zoned by the frontage sweep and
+        // the rest is laid when the cash is back; halving the street or trying it again now would only show its preview again (live 2026-10-08).
+        if (isSpendRefusal(outcome.detail)) { if (course.kind === "GATEWAY") gatewayRefused = true; break; }
         // Without its gateway the district joins nothing; stop before laying anything.
         if (course.kind === "GATEWAY") { gatewayRefused = true; break; }
         // A street stops where the ground does. Measured live: a ring line refused `InWater` for a narrow stream the
@@ -4419,7 +4928,7 @@ export class DistrictBuilder {
       // The land use of each spot comes from the world-corrected mix (shops and offices on the outer faces, homes inside);
       // a player who asked for one land use gets that land use throughout.
       const categories = input.intent?.role ? plan.zoneSpots.map(() => input.intent!.role as ZoneCategory)
-        : assignDistrictSpots(plan.zoneSpots, role === "industrial", this.#mix, this.#available.filter((category) => !this.#paused.includes(category)));
+        : assignDistrictSpots(plan.zoneSpots, role === "industrial", this.#mix, this.#zoningUses());
       // One small block of the district stays unzoned: the lot a hearse or ambulance service can stand on later (see `district-services.ts`).
       const reserved = new Set(role === "industrial" ? [] : reserveSpotIndices(plan.zoneSpots));
       const lot = reservedLotOf(plan.zoneSpots, [...reserved]);

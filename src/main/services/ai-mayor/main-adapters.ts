@@ -3251,6 +3251,29 @@ export function createMainMayorPorts(options: MainMayorAdapterOptions): MayorRun
         return null;
       }
     },
+    // Open jobs by the schooling they ask (education's evidence): well- and highly-educated on one side, poorly-educated and educated on the other.
+    readEducationGap: async (signal) => {
+      try {
+        const free = record(record(record(await callTool("cs2_labor", {}, signal)).jobs).freeByEducation);
+        const open = (key: string) => (Number.isFinite(Number(free[key])) ? Number(free[key]) : 0);
+        return { openHigh: open("wellEducated") + open("highlyEducated"), openMiddle: open("poorlyEducated") + open("educated") };
+      } catch { return null; }
+    },
+    // The tax lever of the jobs side: the rate and the game's own "Taxes" demand factor of shops, industry and offices; the one write.
+    taxes: {
+      read: async (signal) => {
+        try {
+          const rates = record(record(await callTool("cs2_get_taxes", {}, signal)).taxRates);
+          const demand = record(await callTool("cs2_demand", {}, signal));
+          const penalty = (section: unknown) => Math.min(0, Number(record(record(section).factors).Taxes ?? 0));
+          const rateOf = (area: string) => Number(record(rates[area]).rate);
+          const rows = { Commercial: { rate: rateOf("Commercial"), penalty: penalty(demand.commercial) }, Industrial: { rate: rateOf("Industrial"), penalty: penalty(demand.industrial) },
+            Office: { rate: rateOf("Office"), penalty: penalty(demand.office) } };
+          return Object.values(rows).every((row) => Number.isFinite(row.rate) && Number.isFinite(row.penalty)) ? rows : null;
+        } catch { return null; }
+      },
+      set: async (area, rate, signal) => (await districtWrite("cs2_set_tax", { area, rate }, signal)).ok,
+    },
     // The game's progression (V2 P1): achieved milestone, XP and the XP the next milestone asks for, and the game date (month key of the finance watch).
     // The milestone fields exist only in a Bridge built after 2026-10-04; an older Bridge answers null and the stage is read from the unlocks.
     readProgress: async (signal) => {

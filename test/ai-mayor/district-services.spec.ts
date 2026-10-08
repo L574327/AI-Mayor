@@ -63,18 +63,22 @@ describe("the builder places services near the icons", () => {
   const world = { roadGraph: { nodes, edges }, ownedTiles: [] } as never;
   const icons = (count: number) => ({ counts: { "Hearse Notification": count }, items: Array.from({ length: Math.min(count, 20) }, (_, i) => ({ type: "Hearse Notification", x: 400 + (i % 5) * 10, z: 60 })) });
 
-  function harness(options: { legal: (x: number, z: number) => boolean; standing?: number; demolition?: boolean; homes?: boolean }) {
+  const sickIcons = (count: number) => ({ counts: { "Ambulance Notification": count }, items: Array.from({ length: Math.min(count, 20) }, (_, i) => ({ type: "Ambulance Notification", x: 400 + (i % 5) * 10, z: 60 })) });
+
+  function harness(options: { legal: (x: number, z: number) => boolean; standing?: number; demolition?: boolean; homes?: boolean; sick?: boolean }) {
     const log = { preflights: 0, placed: [] as string[], removed: [] as number[] };
     let standing = options.standing ?? 0;
+    const service = options.sick ? "MedicalClinic01" : "Cemetery01";
     const port: DistrictBuilderPort = {
       scanWorld: async () => world, listBuildings: async () => [],
       siteDetail: async (center) => ({ center, radius: 1, roadGraph: { nodes: [], edges: [] }, zoningCells: [], terrain: undefined,
         buildings: options.homes ? [{ entity: { index: 777, version: 1 }, prefab: "EU_ResidentialLow01_L1_2x4", native: false, position: { x: 410, y: 0, z: 70 }, rotation: { x: 0, y: 0, z: 0, w: 1 }, footprint: null }] : [] }) as never,
       buildRoad: async () => ({ ok: true, detail: "" }), zone: async () => ({ ok: true, detail: "" }),
-      readIcons: async () => icons(57),
-      findPrefabs: async (query) => query === "Cemetery" ? [{ name: "Cemetery01", locked: false }, { name: "Cemetery01 Chapel", locked: false }, { name: "Cemetery02", locked: true }] : [],
+      readIcons: async () => (options.sick ? sickIcons(57) : icons(57)),
+      findPrefabs: async (query) => query === "Cemetery" ? [{ name: "Cemetery01", locked: false }, { name: "Cemetery01 Chapel", locked: false }, { name: "Cemetery02", locked: true }]
+        : query === "MedicalClinic" ? [{ name: "MedicalClinic01", locked: false }] : [],
       utilities: {
-        listFacilities: async (prefab) => prefab === "Cemetery01" ? Array.from({ length: standing }, (_, i) => ({ entity: { index: 900 + i, version: 1 }, position: { x: 400, z: 70 + i * 500 } })) : [],
+        listFacilities: async (prefab) => prefab === service ? Array.from({ length: standing }, (_, i) => ({ entity: { index: 900 + i, version: 1 }, position: { x: 400, z: 70 + i * 500 } })) : [],
         preflight: async (_prefab, point) => { log.preflights += 1; return options.legal(point.x, point.z); },
         place: async (prefab, point) => { log.placed.push(`${prefab}@${Math.round(point.x)},${Math.round(point.z)}`); standing += 1; return { ok: true, detail: "" }; },
         attached: async () => null,
@@ -115,21 +119,30 @@ describe("the builder places services near the icons", () => {
   });
 
   test("the bulldoze experiment is off unless asked for, and when on clears one low-density home, once, and places the service on its lot", async () => {
-    const off = harness({ legal: () => false, homes: true });
+    const off = harness({ legal: () => false, homes: true, sick: true });
     await off.run();
     expect(off.log.removed).toEqual([]);
     // On: the only legal lot is where the home stood (x~410, z~70) once it is gone.
     // eslint-disable-next-line prefer-const
     let on!: ReturnType<typeof harness>;
-    on = harness({ legal: (x, z) => on.log.removed.length > 0 && Math.abs(x - 410) < 12 && Math.abs(z - 70) < 12, demolition: true, homes: true });
+    on = harness({ legal: (x, z) => on.log.removed.length > 0 && Math.abs(x - 410) < 12 && Math.abs(z - 70) < 12, demolition: true, homes: true, sick: true });
     const notes: string[] = [];
     expect(await on.run(notes)).toBe(1);
     expect(on.log.removed).toEqual([777]);
-    expect(on.log.placed[0]).toMatch(/^Cemetery01@/);
-    expect(notes.join(" | ")).toMatch(/EXPERIMENT service deathcare: bulldozed EU_ResidentialLow01/);
+    expect(on.log.placed[0]).toMatch(/^MedicalClinic01@/);
+    expect(notes.join(" | ")).toMatch(/EXPERIMENT service healthcare: bulldozed EU_ResidentialLow01/);
     // Never a second one in this process.
     for (let cycle = 0; cycle < SERVICE_COOLDOWN_CYCLES + 1; cycle += 1) await on.run();
     expect(on.log.removed).toEqual([777]);
+  });
+
+  test("no home is taken down for a cemetery: it never stands on a house lot (live 2026-10-08: 11 homes cleared, the cemetery placed on none)", async () => {
+    // eslint-disable-next-line prefer-const
+    let on!: ReturnType<typeof harness>;
+    on = harness({ legal: (x, z) => on.log.removed.length > 0 && Math.abs(x - 410) < 12 && Math.abs(z - 70) < 12, demolition: true, homes: true });
+    for (let cycle = 0; cycle < SERVICE_COOLDOWN_CYCLES + 2; cycle += 1) await on.run();
+    expect(on.log.removed).toEqual([]);
+    expect(on.log.placed).toEqual([]);
   });
 
   test("garbage buildings are counted by kind, as the community guides run them: one incinerator per 25,000, a recycling centre per 15,000, two landfills at most", () => {

@@ -77,6 +77,32 @@ export function poorAtTakeover(funds: Pick<Funds, "money" | "monthlyExpenses">):
   return typeof expenses === "number" && expenses > 0 && funds.money < expenses;
 }
 
+/**
+ * What the fuse lets the planners see (set by the engine once the fuse is armed): the treasury below which it refuses (its floor plus the margin), and the
+ * spend it allows per game hour. A planner that sizes its work by the cash alone builds into the fuse: the batch is cut off half-way, the refused street's
+ * preview flickers every cycle, and the repairs that follow are refused too (live 2026-10-08).
+ */
+export const SPEND_FLOOR_ENV = "AI_MAYOR_SPEND_FLOOR";
+export const SPEND_HOURLY_CAP_ENV = "AI_MAYOR_SPEND_HOURLY_CAP";
+
+/** The treasury below which the fuse refuses now; null when there is no fuse, or it stands down (it would refuse nothing). */
+export function plannerSpendFloor(funds: { treasury: number; monthlyBalance: number } | null | undefined, env: Record<string, string | undefined> = process.env): number | null {
+  const floor = Number(env[SPEND_FLOOR_ENV]);
+  if (!env[SPEND_FLOOR_ENV] || !Number.isFinite(floor) || floor <= 0) return null;
+  // The same stand-down as the fuse: under the floor while the city loses money every month, it refuses nothing.
+  if (funds && funds.treasury < floor && funds.monthlyBalance < 0) return null;
+  return floor;
+}
+
+/** The fuse's spend allowed per game hour, null when there is none. */
+export function plannerHourlyCap(env: Record<string, string | undefined> = process.env): number | null {
+  const cap = Number(env[SPEND_HOURLY_CAP_ENV]);
+  return env[SPEND_HOURLY_CAP_ENV] && Number.isFinite(cap) && cap > 0 ? cap : null;
+}
+
+/** A write the fuse refused (the detail the ports pass on). */
+export const isSpendRefusal = (detail: string | null | undefined): boolean => typeof detail === "string" && detail.includes("SPEND_GUARD_REFUSED");
+
 export class SpendGuardRefusal extends Error {
   constructor(readonly why: string) { super(`SPEND_GUARD_REFUSED:${why}`); this.name = "SpendGuardRefusal"; }
 }
