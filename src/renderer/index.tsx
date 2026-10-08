@@ -20,6 +20,7 @@ root.render(
 );
 
 // The main window shows itself (the chat client in development, the AI Mayor console in the product); the overlay is shown by its own owner.
-if (!new URLSearchParams(window.location.search).has("ai-mayor-overlay") && !new URLSearchParams(window.location.search).has("ai-mayor-subtitle")) {
+const ownWindow = ["ai-mayor-overlay", "ai-mayor-subtitle", "ai-mayor-gamebar"].some((key) => new URLSearchParams(window.location.search).has(key));
+if (!ownWindow) {
   window.bridge.renderer.show().catch(() => {});
 }

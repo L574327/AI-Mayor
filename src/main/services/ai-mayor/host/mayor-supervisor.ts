@@ -47,7 +47,7 @@ export interface ConsoleState {
   /** Spoken "don't rezone" / "don't change the roads". */
   keep: { zoning: boolean; roads: boolean };
   /** Autonomy without outward expansion ("keep the city running, add no districts") and the population target, as the engine holds them. */
-  growth: { held: boolean; targetPopulation: number | null };
+  growth: { held: boolean; targetPopulation: number | null; style: "STEADY" | "SNOWBALL" };
   takenOverWorldId: string | null;
   backup: { ok: boolean; name: string; detail: string; at: string } | null;
   status: { text: string; tick: number; at: string } | null;
@@ -69,7 +69,7 @@ export class MayorSupervisor extends EventEmitter {
   #pendingCommands = new Map<string, (result: { ok: boolean; detail: string; notes?: string[] }) => void>();
   #state: ConsoleState = {
     phase: "IDLE", phaseDetail: null, gameConnection: "UNKNOWN", gamePaused: null,
-    supervision: { state: "IDLE", reason: "", restarts: 0 }, permissions: { ...DEFAULT_PERMISSIONS }, protectedAreas: [], effectivePermissions: null, keep: { zoning: false, roads: false }, growth: { held: false, targetPopulation: null }, takenOverWorldId: null,
+    supervision: { state: "IDLE", reason: "", restarts: 0 }, permissions: { ...DEFAULT_PERMISSIONS }, protectedAreas: [], effectivePermissions: null, keep: { zoning: false, roads: false }, growth: { held: false, targetPopulation: null, style: DEFAULT_PERMISSIONS.growthStyle }, takenOverWorldId: null,
     backup: null, status: null, snapshot: null, lastCycle: null, commentary: [], activity: [],
   };
   #lastReported = "";
@@ -125,6 +125,15 @@ export class MayorSupervisor extends EventEmitter {
     this.#state.permissions = { ...permissions };
     if (this.#child && !this.#childExited) await this.#restartEngine({ backupFirst: false, permissionsChanged: true });
     return this.#publish();
+  }
+
+  /** The growth mode from the home page: kept for the next takeover, and told to a running Mayor at once (no restart). */
+  async setGrowthStyle(style: "STEADY" | "SNOWBALL"): Promise<{ ok: boolean; detail: string; notes?: string[] }> {
+    this.#state.permissions = { ...this.#state.permissions, growthStyle: style };
+    this.#state.growth = { ...this.#state.growth, style };
+    this.#publish();
+    if (!this.#child || this.#childExited) return { ok: true, detail: "kept for the next takeover" };
+    return this.command(style === "SNOWBALL" ? "滚雪球扩张" : "稳健扩张", { goal: null, forbid: [], preserve: [], unsupported: [], style });
   }
 
   clearLimits(): ConsoleState {
@@ -261,7 +270,7 @@ export class MayorSupervisor extends EventEmitter {
         this.#state.protectedAreas = message.protectedAreas;
         this.#state.effectivePermissions = message.permissions;
         this.#state.keep = { zoning: message.keepZoning, roads: message.keepRoads };
-        this.#state.growth = { held: message.expansionHeld === true, targetPopulation: message.targetPopulation ?? null };
+        this.#state.growth = { held: message.expansionHeld === true, targetPopulation: message.targetPopulation ?? null, style: message.growthStyle === "STEADY" ? "STEADY" : "SNOWBALL" };
         break;
     }
     this.#publishThrottled();

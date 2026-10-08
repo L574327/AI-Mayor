@@ -122,6 +122,8 @@ export function chooseResidentialDensity(input: {
    * with none open it yields to low density, which the world still asks for. Set by the caller after QUOTA_YIELD_HOURS of that deadlock.
    */
   quotaYields?: boolean;
+  /** Snowball growth (the player's choice): low density is built whenever the game asks for it at all, nothing denser being open. */
+  eager?: boolean;
 }): DensityChoice {
   const { stage, densities } = input;
   const left = (key: ResidentialDensityKey) => {
@@ -145,6 +147,11 @@ export function chooseResidentialDensity(input: {
   const lowWhy = left("low");
   if (lowWhy !== null) return { density: null, reason: `no density is open for new supply (${[...excluded, `low: ${lowWhy}`].join("; ")})` };
   const quotaUsed = stageRank(stage) >= stageRank(LOW_DENSITY_QUOTA_FROM_STAGE) && input.lowDensityShareSoFar !== null && input.lowDensityShareSoFar >= LOW_DENSITY_QUOTA_SHARE;
+  // The game asks for low density (its bar is high) and nothing denser is open: build it. The quota is a preference for denser homes while they can be built;
+  // it never holds the city's homes back while the city asks for them (live 2026-10-07: 286 cycles "low density over its 25% quota, medium: its demand is nil"
+  // beside a full low-density bar, 1% unemployment and 250 open jobs; community guides agree the low-density bar is rarely ever satisfied).
+  const askedFor = low.demand !== null && low.demand >= (input.eager ? 1 : LOW_DENSITY_DEMAND_HIGH);
+  if (askedFor) return { density: "low", reason: `nothing denser is open and the game asks for low density (demand ${low.demand})${quotaUsed ? `; the ${Math.round(LOW_DENSITY_QUOTA_SHARE * 100)}% quota yields` : ""}${excluded.length > 0 ? ` (${excluded.join("; ")})` : ""}` };
   if (quotaUsed && input.quotaYields) return { density: "low", reason: `low density is over its ${Math.round(LOW_DENSITY_QUOTA_SHARE * 100)}% quota (${Math.round((input.lowDensityShareSoFar ?? 0) * 100)}%), but no denser density has been open for ${QUOTA_YIELD_HOURS}+ game hours and low density is asked for: the quota yields (${excluded.join("; ")})` };
   if (quotaUsed) return { quotaBlocked: true, density: null, reason: `low density is over its ${Math.round(LOW_DENSITY_QUOTA_SHARE * 100)}% quota (${Math.round((input.lowDensityShareSoFar ?? 0) * 100)}% of the residential zoning) from ${LOW_DENSITY_QUOTA_FROM_STAGE} on (${excluded.join("; ")})` };
   const nearlyFull = low.vacancyShare !== null && low.vacancyShare < LOW_DENSITY_VACANCY_MAXIMUM_SHARE;

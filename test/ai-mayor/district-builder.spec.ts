@@ -106,7 +106,7 @@ describe("district builder: the player-style decision layer", () => {
     const house = { x: 500, z: 300 };
     const wide = surveyDistrictSites({ world: servedWorld(), buildings: [], role: "industrial", landUse: { sensitive: [house], polluters: [] } });
     const narrow = surveyDistrictSites({ world: servedWorld(), buildings: [], role: "industrial", landUse: { sensitive: [house], polluters: [] }, industrialBufferMeters: 180 });
-    expect(INDUSTRIAL_BUFFER_STEPS_METERS).toEqual([400, 260, 180]);
+    expect(INDUSTRIAL_BUFFER_STEPS_METERS).toEqual([400, 320]);
     expect(narrow.length).toBeGreaterThanOrEqual(wide.length);
     for (const site of narrow) {
       const dx = Math.max(site.anchor.x - house.x, 0, house.x - (site.anchor.x + site.widthMeters));

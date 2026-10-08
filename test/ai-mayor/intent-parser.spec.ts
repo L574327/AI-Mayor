@@ -1,4 +1,4 @@
-import { parseInstruction } from "../../src/main/services/ai-mayor/host/intent-parser";
+import { mayorControlOf, parseInstruction } from "../../src/main/services/ai-mayor/host/intent-parser";
 
 // Paired Chinese / English instructions must give the same structured goal (the minimum bilingual acceptance of the UI handoff).
 const pairs: Array<[string, string, Record<string, unknown>]> = [
@@ -25,6 +25,39 @@ describe("instruction reader (zh / en)", () => {
     expect(a.intent).toMatchObject(expected);
     expect(b.intent).toMatchObject(expected);
     expect(a.intent).toEqual(b.intent);
+  });
+
+  it("hears growth however the player says it (说一就是一): expand, stop idling, buy land — never a hold, never traffic", () => {
+    for (const said of ["直接扩展，不要发呆了", "给我动起来，别发呆", "不能建就买地，那么多空地", "把城市面积搞大", "给我扩张行吗？"]) {
+      const read = parseInstruction(said);
+      expect(read.understood).toBe(true);
+      expect(read.confident).toBe(true);
+      expect(read.intent?.type).toBe("GROW_POPULATION");
+      expect(read.instruction.growth).toBe("RESUME");
+    }
+    expect(parseInstruction("不能建就买地，那么多空地").intent?.scope?.acquireLand).toBe(true);
+  });
+
+  it("the player can always halt the Mayor by voice, and set it going again; growth words and 'don't stop' are not a halt", () => {
+    for (const said of ["市长停一下", "先停下", "停", "暂停", "别动了", "住手！", "mayor, stop", "pause"]) expect(mayorControlOf(said)).toBe("PAUSE");
+    for (const said of ["继续", "继续干活吧", "开工", "resume", "carry on"]) expect(mayorControlOf(said)).toBe("RESUME");
+    for (const said of ["先别扩张了", "不要停", "给我全力扩张建设，不要停", "停止扩张", "继续扩张", "把问题图标都解决掉", "don't stop"]) expect(mayorControlOf(said)).toBeNull();
+  });
+
+  it("'不要停止扩张' is go on, not a hold; '先别扩张了' still is a hold", () => {
+    expect(parseInstruction("不要停止扩张").instruction.growth).toBe("RESUME");
+    expect(parseInstruction("别停下，继续扩张").instruction.growth).toBe("RESUME");
+    expect(parseInstruction("先别扩张了").instruction.growth).toBe("PAUSE");
+  });
+
+  it("the growth mode is said in words: all-out is snowball, saving is steady", () => {
+    const allOut = parseInstruction("给我全力扩张建设，不要停");
+    expect(allOut).toMatchObject({ understood: true, confident: true });
+    expect(allOut.instruction).toMatchObject({ style: "SNOWBALL", growth: "RESUME" });
+    expect(parseInstruction("有钱就建，滚雪球").instruction.style).toBe("SNOWBALL");
+    expect(parseInstruction("稳健一点，边扩张边攒钱").instruction.style).toBe("STEADY");
+    expect(parseInstruction("先别扩张了").instruction.style).toBeUndefined();
+    expect(parseInstruction("Expand all out, don't stop").instruction.style).toBe("SNOWBALL");
   });
 
   it("does not guess: an instruction it cannot map says so in the player's language", () => {

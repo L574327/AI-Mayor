@@ -7,6 +7,10 @@ import MenuBuilder from "@/main/menu";
 import { type AiMayorOverlaySettings, normalizeAiMayorOverlaySettings } from "@/main/services/ai-mayor-product-mode";
 import { Logger } from "@/main/services/logger";
 
+/** The bar over the game: the folded button's side and the unfolded strip's width (px). */
+const GAME_BAR_BUTTON = 56;
+const GAME_BAR_STRIP_WIDTH = 460;
+
 const TITLE_BAR_OVERLAY_STYLES = {
   light: {
     color: "rgba(227, 227, 227, 1)",
@@ -80,11 +84,18 @@ export class Renderer extends Stateful<Renderer.State> {
    * @returns Electron.BrowserWindowConstructorOptions Browser window configuration options
    */
   get #windowOptions() {
+    // The first size follows the screen (the console's content is about 900 x 700): no wide blank margins on a large screen, nothing cut on a small one.
+    let size = { width: 1024, height: 728 };
+    try {
+      const area = screen.getPrimaryDisplay().workArea;
+      size = { width: Math.round(Math.min(Math.max(880, area.width * 0.5), 1100, area.width - 40)), height: Math.round(Math.min(Math.max(640, area.height * 0.78), 820, area.height - 40)) };
+    } catch { /* before the screen can be read: the old default */ }
     const options: Electron.BrowserWindowConstructorOptions = {
-      width: 1024,
-      height: 728,
+      width: size.width,
+      height: size.height,
       minWidth: 468,
       minHeight: 600,
+      center: true,
       frame: false,
       show: false,
       autoHideMenuBar: true,
@@ -303,6 +314,83 @@ export class Renderer extends Stateful<Renderer.State> {
 
   hideSubtitle() {
     if (this.#subtitleWindow && !this.#subtitleWindow.isDestroyed()) this.#subtitleWindow.hide();
+  }
+
+  #gameBarWindow: BrowserWindow | null = null;
+  #gameBarLoading: Promise<void> | null = null;
+
+  /**
+   * The bar over the game: a small, half-transparent input and a pause button, always on top (windowed or borderless game), so the player speaks to the
+   * Mayor without leaving the game. It takes focus only while the player types (the bar gives it back after a send or Esc). Draggable; `onMoved` keeps where
+   * the player put it.
+   */
+  async showGameBar(at: { x: number; y: number } | null, onMoved: (at: { x: number; y: number }) => void) {
+    if (!this.#gameBarWindow || this.#gameBarWindow.isDestroyed()) {
+      if (!this.#gameBarLoading) {
+        this.#gameBarLoading = (async () => {
+          const { screen } = await import("electron");
+          const area = screen.getPrimaryDisplay().workArea;
+          // Folded: a small round button; unfolded: a white strip (`layoutGameBar`). Default spot: the left edge, a third of the way down (clear of the game's own bars).
+          const width = GAME_BAR_BUTTON;
+          const height = GAME_BAR_BUTTON;
+          const inside = at && at.x >= area.x && at.x <= area.x + area.width - 40 && at.y >= area.y && at.y <= area.y + area.height - 40;
+          const window = new BrowserWindow({
+            width, height, x: inside ? at!.x : Math.round(area.x + 10), y: inside ? at!.y : Math.round(area.y + area.height * 0.32),
+            frame: false, transparent: true, backgroundColor: "#00000000", show: false, resizable: false, movable: true, focusable: true, minimizable: false,
+            maximizable: false, fullscreenable: false, skipTaskbar: true, alwaysOnTop: true, hasShadow: false, autoHideMenuBar: true,
+            webPreferences: { nodeIntegration: true, webSecurity: false, preload: this.#environment.preloadEntry },
+          });
+          window.setAlwaysOnTop(true, "screen-saver");
+          this.#gameBarMoved = onMoved;
+          window.on("closed", () => { this.#gameBarWindow = null; });
+          this.#gameBarWindow = window;
+          if (!app.isPackaged && this.#environment.rendererDevServer) {
+            const url = new URL(this.#environment.rendererDevServer);
+            url.searchParams.set("ai-mayor-gamebar", "1");
+            await window.loadURL(url.toString());
+          } else {
+            await window.loadFile(this.#environment.rendererEntry, { search: "ai-mayor-gamebar=1" });
+          }
+          window.showInactive();
+        })().finally(() => { this.#gameBarLoading = null; });
+      }
+      await this.#gameBarLoading;
+    }
+    const window = this.#gameBarWindow;
+    if (window && !window.isDestroyed() && !window.isVisible()) window.showInactive();
+  }
+
+  sendToGameBar(channel: string, payload: unknown) {
+    if (this.#gameBarWindow && !this.#gameBarWindow.isDestroyed()) this.#gameBarWindow.webContents.send(channel, payload);
+  }
+
+  #gameBarMoved: ((at: { x: number; y: number }) => void) | null = null;
+
+  /** Fold to the button or unfold to the strip (wider, plus a line for the answer); unfolding takes the focus so the player can type at once. */
+  layoutGameBar(open: boolean, withReply: boolean) {
+    const window = this.#gameBarWindow;
+    if (!window || window.isDestroyed()) return;
+    const [x, y] = window.getPosition();
+    window.setBounds({ x: x!, y: y!, width: open ? GAME_BAR_STRIP_WIDTH : GAME_BAR_BUTTON, height: open ? (withReply ? 96 : 60) : GAME_BAR_BUTTON });
+    if (open) window.focus(); else window.blur();
+  }
+
+  /** The player drags the button: the window follows, and its place is kept. */
+  moveGameBarBy(dx: number, dy: number) {
+    const window = this.#gameBarWindow;
+    if (!window || window.isDestroyed() || !Number.isFinite(dx) || !Number.isFinite(dy)) return;
+    const [x, y] = window.getPosition();
+    window.setPosition(Math.round(x! + dx), Math.round(y! + dy));
+    this.#gameBarMoved?.({ x: Math.round(x! + dx), y: Math.round(y! + dy) });
+  }
+
+  /** Give the focus back (to the game, the window the player was in) after a send or Esc. */
+  releaseGameBar() {
+    if (this.#gameBarWindow && !this.#gameBarWindow.isDestroyed()) this.#gameBarWindow.blur();
+  }
+
+  hideGameBar() {
+    if (this.#gameBarWindow && !this.#gameBarWindow.isDestroyed()) this.#gameBarWindow.hide();
   }
 
   closeOverlay() {

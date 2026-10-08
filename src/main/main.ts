@@ -24,6 +24,7 @@ import {
   nativeImage,
   nativeTheme,
   safeStorage,
+  net,
   shell,
   Tray,
 } from "electron";
@@ -51,9 +52,10 @@ import { Database } from "@/main/database";
 import { Environment } from "@/main/environment";
 import { Container } from "@/main/internal/container";
 import { createMainMayorPorts } from "@/main/services/ai-mayor/main-adapters";
-import { parseInstruction } from "@/main/services/ai-mayor/host/intent-parser";
+import { mayorControlOf, parseInstruction } from "@/main/services/ai-mayor/host/intent-parser";
 import { DEFAULT_MANIFEST_URL, hashMatches, judgeUpdate, parseManifest, type UpdateVerdict } from "@/main/services/ai-mayor/host/update-check";
 import type { Instruction } from "@/main/services/ai-mayor/host/intent-lowering";
+import type { MayorStructuredGoalIntent } from "@/main/services/ai-mayor/types";
 import { buildPrompt, checkReply, interpretViaApi, newRequestCode } from "@/main/services/ai-mayor/host/semantic-frontend";
 import { createFileUsageMeter, DEFAULT_DAILY_TOKEN_LIMIT } from "@/main/services/ai-mayor/host/ai-usage";
 import { type ProviderConfig, type ProviderPreset, queryBalance, resolveProvider, setUsageMeter } from "@/main/services/ai-mayor/host/ai-providers";
@@ -692,7 +694,8 @@ ipcMain.handle("ai-mayor-copy-diagnostics", async () => {
 
 // ---- The product console (host/): one supervised Mayor engine, the console window shows it -------------------------------------------------
 let mayorConsoleSupervisor: ReturnType<typeof productSupervisor> | null = null;
-const subtitleStore = new Store<{ enabled?: boolean }>({ name: "ai-mayor-subtitle" });
+const subtitleStore = new Store<{ enabled?: boolean; gameBar?: boolean; gameBarAt?: { x: number; y: number }; avatar?: string }>({ name: "ai-mayor-subtitle" });
+let gameBarShown = false;
 let lastSubtitleAt: string | null = null;
 let mayorModInstall: ReturnType<typeof installBridgeMod> | null = null;
 const mayorConsole = () => {
@@ -703,6 +706,15 @@ const mayorConsole = () => {
   mayorConsoleSupervisor = productSupervisor(paths, (line, detail) => logger.info(line, detail ?? {}));
   mayorConsoleSupervisor.on("state", (state) => {
     getMainWindow()?.webContents.send("ai-mayor-console-state", state);
+    // The bar over the game (input + pause): while a takeover is running or paused, unless the player switched it off.
+    const takenOver = state.phase === "RUNNING" || state.phase === "PAUSING" || state.phase === "PAUSED" || state.phase === "STARTING" || state.phase === "BACKING_UP";
+    const renderer = Container.inject(Renderer);
+    if (takenOver && subtitleStore.get("gameBar") !== false) {
+      // Asked every time: a button that was hidden or closed for any reason comes back while the Mayor is on (showing one that stands is a no-op).
+      gameBarShown = true;
+      void renderer.showGameBar(subtitleStore.get("gameBarAt") ?? null, (at) => subtitleStore.set("gameBarAt", at)).catch(() => { gameBarShown = false; });
+      renderer.sendToGameBar("ai-mayor-console-state", { phase: state.phase, commentary: state.commentary.slice(-1) });
+    } else if (gameBarShown) { gameBarShown = false; renderer.hideGameBar(); }
     // The subtitle over the game: each new line of the Mayor while it runs (the player can switch it off in the console).
     const latest = state.commentary.at(-1);
     const running = state.phase === "RUNNING" || state.phase === "PAUSING";
@@ -724,7 +736,22 @@ ipcMain.handle("ai-mayor-console-parse", (_, text: string) => parseInstruction(S
 const langOf = (text: string): "zh" | "en" => (/[㐀-鿿]/.test(text) ? "zh" : "en");
 /** Hand a read instruction (goal, forbids, districts to keep) to the Mayor, which lowers it through the compiler subset against the real city. */
 const sendInstruction = (text: string, instruction: Instruction) => mayorConsole().command(String(text ?? ""), instruction, langOf(String(text ?? "")));
+/** "市长停一下" / "继续干活": the Mayor is paused or resumed at once, whatever else would read the sentence (the player can always halt it by voice). */
+const mayorControl = async (raw: string): Promise<{ ok: boolean; detail: string; notes: string[]; source: "local" } | null> => {
+  const text = String(raw ?? "");
+  const control = mayorControlOf(text);
+  if (!control) return null;
+  const zh = langOf(text) === "zh";
+  if (control === "PAUSE") {
+    mayorConsole().pause();
+    return { ok: true, detail: "paused", source: "local", notes: [zh ? "市长已暂停：手上这一轮做完就停，说“继续”恢复。" : "The Mayor is paused: it stops after the round in hand; say \"continue\" to resume."] };
+  }
+  await mayorConsole().resumeOrStart();
+  return { ok: true, detail: "resumed", source: "local", notes: [zh ? "市长继续工作。" : "The Mayor is back at work."] };
+};
 ipcMain.handle("ai-mayor-console-command", async (_, text: string) => {
+  const control = await mayorControl(text);
+  if (control) return control;
   const parsed = parseInstruction(String(text ?? ""));
   if (!parsed.understood) return { ok: false, detail: parsed.summary, parsed };
   return { ...(await sendInstruction(text, parsed.instruction)), parsed };
@@ -768,13 +795,32 @@ ipcMain.handle("ai-mayor-console-language-set", (_, settings: { mode?: "api" | "
  * API mode: a sentence the local reader understood completely goes to the Mayor at once (free, offline, no token spent); only a sentence it did not fully
  * understand is read by the configured AI through the filter (the local reading answers when the AI does not).
  */
+/**
+ * The player's growth words win (说一就是一): what the local reader took for growth — a building goal, the growth mode, "go on" — is kept over an AI reading that
+ * missed it, and an AI's catch-all "see to every problem" never stands in for "expand" (live 2026-10-07: "直接扩展" came back as traffic care).
+ */
+const isBuildGoal = (goal: MayorStructuredGoalIntent | null | undefined) => !!goal && (goal.type === "GROW_POPULATION" || goal.type.startsWith("EXPAND_"));
+const withLocalGrowth = (ai: Instruction, local: ReturnType<typeof parseInstruction>): Instruction => {
+  const localGoals = [local.instruction.goal, ...(local.instruction.goals ?? [])];
+  const build = localGoals.find(isBuildGoal) ?? null;
+  if (!build && !local.instruction.style && !local.instruction.growth) return ai;
+  const aiGoals = [ai.goal, ...(ai.goals ?? [])].filter((goal): goal is MayorStructuredGoalIntent => !!goal)
+    // A catch-all care goal (no problem named) is the AI's guess, not the player's word, when the player asked for growth.
+    .filter((goal) => !(build && goal.type === "RESOLVE_ISSUES" && !(goal.scope?.issues?.length)));
+  const goals = aiGoals.some(isBuildGoal) || !build ? aiGoals : [...aiGoals, build];
+  return { ...ai, goal: goals[0] ?? null, goals: goals.slice(1), fallback: false,
+    ...(ai.growth ?? local.instruction.growth ? { growth: ai.growth ?? local.instruction.growth } : {}),
+    ...(ai.style ?? local.instruction.style ? { style: ai.style ?? local.instruction.style } : {}) };
+};
 ipcMain.handle("ai-mayor-console-interpret", async (_, text: string) => {
+  const control = await mayorControl(text);
+  if (control) return control;
   const config = readApiConfig();
   const sure = parseInstruction(String(text ?? ""));
   if (sure.understood && sure.confident) return { ...(await sendInstruction(text, sure.instruction)), source: "local", intent: sure.intent };
   if (config) {
     const read = await interpretViaApi(config, String(text ?? ""));
-    if (read.ok) return { ...(await sendInstruction(text, read.instruction)), source: "api", intent: read.intent };
+    if (read.ok) return { ...(await sendInstruction(text, withLocalGrowth(read.instruction, sure))), source: "api", intent: read.intent };
     const local = parseInstruction(String(text ?? ""));
     if (local.understood) return { ...(await sendInstruction(text, local.instruction)), source: "local", intent: local.intent, apiError: read.detail };
     // The service did not answer (or not in the format): the Mayor still looks after the city rather than turning the player away.
@@ -810,9 +856,11 @@ ipcMain.handle("ai-mayor-console-send-intent", async (_, payload: { text: string
   const checked = checkReply(String(payload?.reply ?? ""), pendingAssistedCode);
   if (!checked.ok) return { ok: false, detail: checked.detail };
   pendingAssistedCode = null;
-  return { ...(await sendInstruction(String(payload.text ?? ""), checked.instruction)), intent: checked.intent };
+  return { ...(await sendInstruction(String(payload.text ?? ""), withLocalGrowth(checked.instruction, parseInstruction(String(payload.text ?? ""))))), intent: checked.intent };
 });
 ipcMain.handle("ai-mayor-console-send-local", async (_, text: string) => {
+  const control = await mayorControl(text);
+  if (control) return control;
   const local = parseInstruction(String(text ?? ""));
   if (!local.understood) return { ok: false, detail: local.summary };
   return { ...(await sendInstruction(text, local.instruction)), intent: local.intent };
@@ -824,7 +872,8 @@ const updateManifestUrl = () => (/^https:\/\//i.test(process.env.AI_MAYOR_UPDATE
 const checkForProductUpdate = async (force: boolean): Promise<{ ok: boolean; verdict: UpdateVerdict | null; error?: string }> => {
   if (!force && lastUpdateVerdict && Date.now() - lastUpdateCheckAt < 6 * 60 * 60_000) return { ok: true, verdict: lastUpdateVerdict };
   try {
-    const response = await fetch(updateManifestUrl(), { signal: AbortSignal.timeout(8_000), headers: { "cache-control": "no-cache" } });
+    // Chromium's network stack (`net.fetch`), not Node's fetch: it follows the system proxy, which players behind a local proxy depend on (live 2026-10-08: Node's fetch went to the polluted direct address and timed out).
+    const response = await net.fetch(updateManifestUrl(), { signal: AbortSignal.timeout(15_000), headers: { "cache-control": "no-cache" } });
     if (!response.ok) return { ok: false, verdict: lastUpdateVerdict, error: `HTTP ${response.status}` };
     const manifest = parseManifest(await response.json());
     if (!manifest) return { ok: false, verdict: lastUpdateVerdict, error: "the update file is not valid" };
@@ -845,7 +894,7 @@ ipcMain.handle("ai-mayor-console-update-install", async () => {
   }
   const file = join(app.getPath("temp"), `AI-Mayor-Setup-${manifest.version}.exe`);
   try {
-    const response = await fetch(manifest.downloadUrl, { signal: AbortSignal.timeout(15 * 60_000) });
+    const response = await net.fetch(manifest.downloadUrl, { signal: AbortSignal.timeout(15 * 60_000) });
     if (!response.ok || !response.body) return { ok: false, error: `download failed: HTTP ${response.status}` };
     const hash = createHash("sha256");
     const out = fs.createWriteStream(file);
@@ -859,7 +908,8 @@ ipcMain.handle("ai-mayor-console-update-install", async () => {
     return { ok: true, opened: "installer" };
   } catch (error) { try { fs.unlinkSync(file); } catch { /* none */ } return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
 });/** The two growth controls on the home page: autonomy without outward expansion (a tick box) and the population at which growth stops. Same road as a spoken instruction. */
-ipcMain.handle("ai-mayor-console-growth", async (_, change: { held?: boolean; targetPopulation?: number }) => {
+ipcMain.handle("ai-mayor-console-growth", async (_, change: { held?: boolean; targetPopulation?: number; style?: "STEADY" | "SNOWBALL" }) => {
+  if (change?.style === "STEADY" || change?.style === "SNOWBALL") return mayorConsole().setGrowthStyle(change.style);
   const instruction: Instruction = { goal: null, forbid: [], preserve: [], unsupported: [],
     ...(typeof change?.held === "boolean" ? { growth: change.held ? "PAUSE" as const : "RESUME" as const } : {}),
     ...(Number.isFinite(change?.targetPopulation) ? { targetPopulation: Math.round(change.targetPopulation!) } : {}) };
@@ -884,6 +934,38 @@ const gameExclusiveFullscreen = (): boolean | null => {
   } catch { return null; }
 };
 ipcMain.handle("ai-mayor-console-subtitle-state", () => subtitleStore.get("enabled") !== false);
+// The bar over the game: on/off in the console, its focus handed back to the game after a send.
+ipcMain.handle("ai-mayor-console-gamebar-state", () => subtitleStore.get("gameBar") !== false);
+ipcMain.handle("ai-mayor-console-gamebar", (_, on: boolean) => {
+  subtitleStore.set("gameBar", on === true);
+  if (on !== true && gameBarShown) { gameBarShown = false; Container.inject(Renderer).hideGameBar(); }
+  else if (on === true && mayorConsoleSupervisor) { const state = mayorConsoleSupervisor.state; mayorConsoleSupervisor.emit("state", state); }
+  return on === true;
+});
+ipcMain.handle("ai-mayor-gamebar-release", () => Container.inject(Renderer).releaseGameBar());
+// The game button's picture: chosen in the console (its dialog is the console's, never one hidden behind the game), square-cropped to 128 px and kept.
+ipcMain.handle("ai-mayor-gamebar-avatar-get", () => subtitleStore.get("avatar") ?? null);
+ipcMain.handle("ai-mayor-console-avatar-pick", async () => {
+  const window = getMainWindow();
+  const picked = window ? await dialog.showOpenDialog(window, { properties: ["openFile"], filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp"] }] })
+    : await dialog.showOpenDialog({ properties: ["openFile"], filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp"] }] });
+  const file = picked.canceled ? null : picked.filePaths[0];
+  if (!file) return { ok: false, detail: "canceled" };
+  try {
+    if (fs.statSync(file).size > 15_000_000) return { ok: false, detail: "the picture is larger than 15 MB" };
+    const image = nativeImage.createFromPath(file);
+    if (image.isEmpty()) return { ok: false, detail: "not a picture this app can read" };
+    const { width, height } = image.getSize();
+    const side = Math.min(width, height);
+    const url = image.crop({ x: Math.floor((width - side) / 2), y: Math.floor((height - side) / 2), width: side, height: side }).resize({ width: 128, height: 128, quality: "best" }).toDataURL();
+    subtitleStore.set("avatar", url);
+    Container.inject(Renderer).sendToGameBar("ai-mayor-gamebar-avatar", url);
+    return { ok: true, avatar: url };
+  } catch (error) { return { ok: false, detail: error instanceof Error ? error.message : String(error) }; }
+});
+ipcMain.handle("ai-mayor-console-avatar-reset", () => { subtitleStore.delete("avatar"); Container.inject(Renderer).sendToGameBar("ai-mayor-gamebar-avatar", null); return { ok: true }; });
+ipcMain.handle("ai-mayor-gamebar-layout", (_, layout: { open: boolean; reply: boolean }) => Container.inject(Renderer).layoutGameBar(layout?.open === true, layout?.reply === true));
+ipcMain.handle("ai-mayor-gamebar-move", (_, delta: { dx: number; dy: number }) => Container.inject(Renderer).moveGameBarBy(Number(delta?.dx), Number(delta?.dy)));
 ipcMain.handle("ai-mayor-console-game-fullscreen", () => gameExclusiveFullscreen());
 /** Links the console may open: web pages only. */
 ipcMain.handle("ai-mayor-console-open", (_, url: string) => { if (/^https:\/\/[^\s]+$/i.test(String(url ?? ""))) void shell.openExternal(url); });

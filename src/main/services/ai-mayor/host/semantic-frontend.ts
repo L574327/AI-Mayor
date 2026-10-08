@@ -11,7 +11,8 @@
  */
 import type { MayorStructuredGoalIntent } from "../types";
 import { type ProviderConfig, sendPrompt } from "./ai-providers";
-import { FORBID_KINDS, type ForbidKind, type GrowthControl, type Instruction, TARGET_POPULATION_RANGE } from "./intent-lowering";
+import { capabilityLinesForPrompt } from "./capability-index";
+import { FORBID_KINDS, type ForbidKind, type GrowthControl, type GrowthStyle, type Instruction, TARGET_POPULATION_RANGE } from "./intent-lowering";
 
 const TYPES = ["GROW_POPULATION", "EXPAND_RESIDENTIAL", "EXPAND_COMMERCIAL", "EXPAND_INDUSTRIAL", "EXPAND_OFFICE", "PROVIDE_SERVICE", "IMPROVE_TRAFFIC",
   "ESTABLISH_ROAD_NETWORK", "REDEVELOP_AREA", "CONNECT_ACROSS_OBSTACLE", "RESOLVE_ISSUES"] as const;
@@ -41,7 +42,7 @@ export function buildPrompt(request: string, code: string): string {
     "You translate one request from a Cities: Skylines II player into a structured instruction for the AI Mayor, an app that runs the player's city.",
     "You are a translator, not a planner: never invent coordinates, buildings, budgets, tax numbers or district names. Reply with ONE line only, no explanation.",
     "",
-    `FORMAT: ${line('{"goals":[GOAL,...],"growth":null,"targetPopulation":null,"forbid":[],"preserve":[],"unsupported":[]}')}`,
+    `FORMAT: ${line('{"goals":[GOAL,...],"growth":null,"style":null,"targetPopulation":null,"forbid":[],"preserve":[],"unsupported":[]}')}`,
     "GOAL = {\"type\":TYPE,\"scope\":{...optional},\"priority\":\"LOW\"|\"NORMAL\"|\"HIGH\"}. 0-3 goals, in the player's order.",
     "",
     "TYPES (what each means):",
@@ -64,6 +65,8 @@ export function buildPrompt(request: string, code: string): string {
     "OTHER FIELDS:",
     "- growth: \"PAUSE\" when the player wants no more expansion (\"stop expanding\", \"don't build new districts\", \"先别扩张\"); \"RESUME\" when they want it back. Otherwise null.",
     "  A pause never becomes a goal; the Mayor keeps fixing problems while paused.",
+    "- style: \"SNOWBALL\" when the player wants growth all out (\"全力扩张\", \"滚雪球\", \"有钱就建\", \"don't stop\", \"as fast as possible\"); \"STEADY\" when they want growth that saves money (\"稳健\", \"攒钱\"). Otherwise null.",
+    "  Any wish to expand (\"扩张\", \"扩展\", \"别发呆\", \"动起来\", \"把城市搞大\") is GROW_POPULATION — never RESOLVE_ISSUES or traffic.",
     "- targetPopulation: a number only when the player names a population to reach (\"grow to 50k\" = 50000, \"5万人\" = 50000, \"10万\" = 100000). Otherwise null.",
     `- forbid: any of ${FORBID_KINDS.join(", ")} — ONLY what the player forbids (\"don't demolish\" = demolition, \"no loans\" = loan, \"don't touch the roads\" = road_rebuild, \"don't buy land\" = land_purchase, \"don't rezone\" = zoning_change).`,
     "  A \"don't\" must never become a goal or a permission.",
@@ -78,7 +81,10 @@ export function buildPrompt(request: string, code: string): string {
     "- \"build me a city / develop / 建设一个城市\" with nothing else = GROW_POPULATION (or the expansion above when a style is given).",
     "- Put in unsupported ONLY what really cannot be done (a named landmark, a specific building, a metro line, tax numbers, a place that is not a compass side).",
     "",
+    ...capabilityLinesForPrompt(),
+    "",
     "EXAMPLES:",
+    `\"给我全力扩张建设，不要停\" -> ${line('{"goals":[{"type":"GROW_POPULATION","priority":"NORMAL"}],"growth":"RESUME","style":"SNOWBALL","targetPopulation":null,"forbid":[],"preserve":[],"unsupported":[]}')}`,
     `\"给我建设一个漂亮的城市，要高楼大厦\" -> ${line('{"goals":[{"type":"RESOLVE_ISSUES","scope":{"issues":[]},"priority":"NORMAL"},{"type":"EXPAND_RESIDENTIAL","scope":{"density":"HIGH"},"priority":"NORMAL"}],"growth":null,"targetPopulation":null,"forbid":[],"preserve":[],"unsupported":[]}')}`,
     `\"垃圾堆成山了，还有好多房子没接上路\" -> ${line('{"goals":[{"type":"RESOLVE_ISSUES","scope":{"issues":["GARBAGE","ACCESS"]},"priority":"NORMAL"}],"growth":null,"targetPopulation":null,"forbid":[],"preserve":[],"unsupported":[]}')}`,
     `\"城市太堵了，别拆房子\" -> ${line('{"goals":[{"type":"IMPROVE_TRAFFIC","priority":"NORMAL"}],"growth":null,"targetPopulation":null,"forbid":["demolition"],"preserve":[],"unsupported":[]}')}`,
@@ -153,6 +159,7 @@ export function describeInstruction(instruction: Instruction): { zh: string; en:
       out.push(extras.length > 0 ? `${what}（${extras.join(index === 0 ? "，" : ", ")}）` : what);
     }
     if (instruction.growth) out.push(instruction.growth === "PAUSE" ? (index === 0 ? "暂停扩张" : "hold expansion") : (index === 0 ? "恢复扩张" : "resume expansion"));
+    if (instruction.style) out.push(instruction.style === "SNOWBALL" ? (index === 0 ? "滚雪球：有钱就建" : "snowball: cash goes into building") : (index === 0 ? "稳健：边扩张边攒钱" : "steady: grow while saving"));
     if (instruction.targetPopulation !== undefined) out.push(index === 0 ? `目标人口 ${instruction.targetPopulation.toLocaleString("zh-CN")}` : `target population ${instruction.targetPopulation.toLocaleString("en-US")}`);
     for (const kind of instruction.forbid) out.push(FORBID_WORDS[kind][index]);
     for (const name of instruction.preserve) out.push(index === 0 ? `保护“${name}”` : `keep "${name}"`);
@@ -187,6 +194,11 @@ export function checkReply(reply: string, code: string): ReplyCheck {
     if (parsed.growth !== "PAUSE" && parsed.growth !== "RESUME") return { ok: false, error: "INVALID", detail: "growth must be PAUSE, RESUME or null" };
     growth = parsed.growth;
   }
+  let style: GrowthStyle | undefined;
+  if (parsed.style !== undefined && parsed.style !== null) {
+    if (parsed.style !== "SNOWBALL" && parsed.style !== "STEADY") return { ok: false, error: "INVALID", detail: "style must be SNOWBALL, STEADY or null" };
+    style = parsed.style;
+  }
   let targetPopulation: number | undefined;
   if (parsed.targetPopulation !== undefined && parsed.targetPopulation !== null) {
     const value = Number(parsed.targetPopulation);
@@ -201,9 +213,9 @@ export function checkReply(reply: string, code: string): ReplyCheck {
   if (preserveRaw.some((item) => typeof item !== "string" || !item.trim() || item.length > 60)) return { ok: false, error: "INVALID", detail: "preserve must be district names" };
   const unsupported = [...(Array.isArray(parsed.unsupported) ? parsed.unsupported : []), ...(rawGoal?.type === "UNSUPPORTED" ? [rawGoal.reason ?? parsed.reason ?? "not supported"] : [])]
     .map((item) => String(item).slice(0, 120)).filter(Boolean).slice(0, 5);
-  const instruction: Instruction = { goal, ...(goals.length > 1 ? { goals: goals.slice(1) } : {}), ...(growth ? { growth } : {}), ...(targetPopulation !== undefined ? { targetPopulation } : {}),
+  const instruction: Instruction = { goal, ...(goals.length > 1 ? { goals: goals.slice(1) } : {}), ...(growth ? { growth } : {}), ...(style ? { style } : {}), ...(targetPopulation !== undefined ? { targetPopulation } : {}),
     forbid: [...new Set(forbidRaw as ForbidKind[])], preserve: [...new Set((preserveRaw as string[]).map((item) => item.trim()))], unsupported };
-  if (!goal && !growth && targetPopulation === undefined && instruction.forbid.length === 0 && instruction.preserve.length === 0) {
+  if (!goal && !growth && !style && targetPopulation === undefined && instruction.forbid.length === 0 && instruction.preserve.length === 0) {
     // Never a flat refusal: nothing here can be carried out as said, so the Mayor keeps looking after the city (the same as without any instruction) and says what it left out.
     const care: MayorStructuredGoalIntent = { kind: "GOAL", type: "RESOLVE_ISSUES", priority: "NORMAL" };
     const softened: Instruction = { ...instruction, goal: care, fallback: true };

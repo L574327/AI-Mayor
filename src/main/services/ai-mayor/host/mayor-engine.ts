@@ -40,12 +40,19 @@ const SNAPSHOT_EVERY_MS = 5_000;
 const WAIT_CYCLE_REST_MS = 10_000;
 /** A wait the policy decided in no time at all (no site was searched, no world read) is asked again soon: the next district should follow the last one, not wait half a minute. */
 const QUICK_WAIT_REST_MS = 3_000;
+/** The slow-down of cycles that build nothing in a row (see the main loop). */
+const IDLE_BACKOFF_BASE_MS = 3_000;
+const IDLE_BACKOFF_MAX_MS = 30_000;
+let idleStreak = 0;
 const WAIT_FOR_GAME_EVERY_MS = 3_000;
 
 // The permissions are read where they apply (runtime and district builder), from the environment of this process.
 process.env.AI_MAYOR_ALLOW_LAND = permissions.allowLand ? "1" : "0";
 process.env.AI_MAYOR_ALLOW_ECONOMY = permissions.allowEconomy ? "1" : "0";
 process.env.AI_MAYOR_PRESERVE_PLAYER_ASSETS = permissions.preservePlayerAssets ? "1" : "0";
+process.env.AI_MAYOR_GROWTH_STYLE = permissions.growthStyle;
+// The icons outrank the houses in the way (the player's ruling, 2026-10-08): a service with no lot may clear one, unless the player keeps their buildings.
+process.env.AI_MAYOR_SERVICE_DEMOLITION_EXPERIMENT = permissions.preservePlayerAssets ? "0" : "1";
 // The milestone popup is watched for the whole session (the live recipe).
 process.env.AI_MAYOR_MODAL_BACKGROUND_WATCH = "1";
 
@@ -235,7 +242,7 @@ async function main(): Promise<void> {
   const saidKeyAt = new Map<string, number>();
   let lastSpokeAt = 0;
   const SAME_TEXT_MS = 45 * 60_000;
-  const SAME_KEY_MS = 5 * 60_000;
+  const SAME_KEY_MS = 8 * 60_000;
   /** However many things happen, at most one line a minute: a subtitle that keeps pace with every note is noise. A player instruction is answered at once. */
   const MIN_GAP_MS = 60_000;
   const speak = (lines: readonly NarratedLine[], urgent = false) => {
@@ -288,7 +295,9 @@ async function main(): Promise<void> {
       const finance = narrateFinance(text, narrationLang);
       if (finance) speak([finance]);
     },
-    emitMayorCommentary: (line) => { const text = String((line as { text?: unknown }).text ?? ""); const tone = String((line as { tone?: unknown }).tone ?? "info"); if (text) speak([{ key: `runtime:${text}`, text, tone: (["done", "blocked", "info", "warn"].includes(tone) ? tone : "info") as NarratedLine["tone"] }]); } });
+    // The runtime's older event templates ("watching the world", the same line every wait) are not said: the expressor above says the facts of each cycle,
+    // and those templates were the subtitle's repeated words (the player's complaint, 2026-10-07/08).
+    emitMayorCommentary: () => undefined });
   // The Brain spends nothing on a model provider: balance is not a gate.
   ports.getBalance = async () => ({ isAvailable: true, currency: "CNY", totalBalance: 10_000, grantedBalance: 0, toppedUpBalance: 10_000, fetchedAt: new Date().toISOString() });
   // A stop of this process must not write a save of its own (the rotating checkpoints and the takeover backup are the saves).
@@ -296,21 +305,23 @@ async function main(): Promise<void> {
 
   // The player's limits (protected districts, forbidden operations) for this world, kept across restarts of the engine and of the app.
   const limitsFile = path.join(dataDir, "instructions.json");
-  type Limits = { revision: AcceptedRevision | null; protectedAreas: ProtectedArea[]; overrides: Lowered["permissions"]; expansionHeld?: boolean; targetPopulation?: number | null };
+  type Limits = { revision: AcceptedRevision | null; protectedAreas: ProtectedArea[]; overrides: Lowered["permissions"]; expansionHeld?: boolean; targetPopulation?: number | null; growthStyle?: "STEADY" | "SNOWBALL" | null };
   let limits: Limits = { revision: null, protectedAreas: [], overrides: {} };
   let generation = 0;
   try {
     const stored = obj(obj(JSON.parse(fs.readFileSync(limitsFile, "utf8")))[worldId]);
     if (Array.isArray(stored.protectedAreas)) limits = { revision: (stored.revision as AcceptedRevision | null) ?? null,
       protectedAreas: stored.protectedAreas as ProtectedArea[], overrides: obj(stored.overrides) as Lowered["permissions"],
-      expansionHeld: stored.expansionHeld === true, targetPopulation: num(stored.targetPopulation) };
+      expansionHeld: stored.expansionHeld === true, targetPopulation: num(stored.targetPopulation),
+      growthStyle: stored.growthStyle === "SNOWBALL" || stored.growthStyle === "STEADY" ? stored.growthStyle : null };
   } catch { /* no limits recorded yet */ }
   // A change in Settings is the player's latest word on the three permissions Settings shows; the districts they asked to keep and the spoken
   // "don't rezone / don't change the roads" (no switch in Settings) stay.
   const permissionsChanged = process.env[ENGINE_ENV.permissionsChanged] === "1";
   if (permissionsChanged) {
     const { keepZoning, keepRoads } = limits.overrides;
-    limits = { ...limits, overrides: { ...(keepZoning ? { keepZoning } : {}), ...(keepRoads ? { keepRoads } : {}) } };
+    // The mode switch in Settings is the player's latest word on the growth mode too.
+    limits = { ...limits, overrides: { ...(keepZoning ? { keepZoning } : {}), ...(keepRoads ? { keepRoads } : {}) }, growthStyle: null };
   }
   const saveLimits = () => {
     try {
@@ -332,9 +343,10 @@ async function main(): Promise<void> {
     process.env.AI_MAYOR_PRESERVE_PLAYER_ASSETS = effective.preservePlayerAssets ? "1" : "0";
     process.env.AI_MAYOR_KEEP_ZONING = limits.overrides.keepZoning === true ? "1" : "0";
     process.env.AI_MAYOR_KEEP_ROADS = limits.overrides.keepRoads === true ? "1" : "0";
+    process.env.AI_MAYOR_GROWTH_STYLE = limits.growthStyle ?? permissions.growthStyle;
     send({ k: "limits", protectedAreas: limits.protectedAreas.map((area) => area.name), permissions: effective,
       keepZoning: limits.overrides.keepZoning === true, keepRoads: limits.overrides.keepRoads === true,
-      expansionHeld: limits.expansionHeld === true, targetPopulation: limits.targetPopulation ?? null });
+      expansionHeld: limits.expansionHeld === true, targetPopulation: limits.targetPopulation ?? null, growthStyle: limits.growthStyle ?? permissions.growthStyle });
   };
   const readDistricts = async (): Promise<CityDistrict[]> => {
     const listed = await look("cs2_list_districts");
@@ -349,7 +361,7 @@ async function main(): Promise<void> {
   };
   applyLimits();
   if (permissionsChanged) saveLimits();
-  clearLimits = () => { limits = { revision: null, protectedAreas: [], overrides: {}, expansionHeld: limits.expansionHeld, targetPopulation: limits.targetPopulation }; applyLimits(); saveLimits(); };
+  clearLimits = () => { limits = { revision: null, protectedAreas: [], overrides: {}, expansionHeld: limits.expansionHeld, targetPopulation: limits.targetPopulation, growthStyle: limits.growthStyle }; applyLimits(); saveLimits(); };
 
   runtime = new MayorRuntime(ports);
   runtime.setObjectiveProfile(parseObjectiveProfile(process.env.AI_MAYOR_PROFILE ?? "BALANCED") ?? parseObjectiveProfile("BALANCED")!);
@@ -427,6 +439,7 @@ async function main(): Promise<void> {
   };
   const handleCommand = async (runtime: MayorRuntime, command: Extract<HostMessage, { k: "command" }>) => {
     commandsHandled += 1;
+    idleStreak = 0; // the player spoke: the next cycles run at full speed again
     if (command.lang === "zh" || command.lang === "en") narrationLang = command.lang;
     try {
       // The host builds the instruction from the local reader or a checked AI reply; it is still checked here, field by field, so a malformed one
@@ -438,11 +451,12 @@ async function main(): Promise<void> {
         goals: (Array.isArray(raw.goals) ? raw.goals : []).filter(isGoal).slice(0, 3) as NonNullable<Instruction["goals"]>,
         ...(raw.growth === "PAUSE" || raw.growth === "RESUME" ? { growth: raw.growth } : {}),
         ...(num(raw.targetPopulation) !== null ? { targetPopulation: num(raw.targetPopulation)! } : {}),
+        ...(raw.style === "SNOWBALL" || raw.style === "STEADY" ? { style: raw.style } : {}),
         forbid: (Array.isArray(raw.forbid) ? raw.forbid : []).filter((kind): kind is ForbidKind => (FORBID_KINDS as readonly unknown[]).includes(kind)),
         preserve: (Array.isArray(raw.preserve) ? raw.preserve : []).filter((name): name is string => typeof name === "string" && name.trim().length > 0).map((name) => name.trim().slice(0, 60)).slice(0, 12),
         unsupported: (Array.isArray(raw.unsupported) ? raw.unsupported : []).filter((item): item is string => typeof item === "string").slice(0, 12),
       };
-      if (!instruction.goal && !instruction.goals?.length && !instruction.growth && instruction.targetPopulation === undefined && instruction.forbid.length === 0 && instruction.preserve.length === 0) {
+      if (!instruction.goal && !instruction.goals?.length && !instruction.growth && !instruction.style && instruction.targetPopulation === undefined && instruction.forbid.length === 0 && instruction.preserve.length === 0) {
         send({ k: "command-result", id: command.id, ok: false, detail: "nothing in this instruction the Mayor can act on", notes: instruction.unsupported });
         return;
       }
@@ -467,6 +481,7 @@ async function main(): Promise<void> {
       }
       // Growth first (a "stop expanding" holds before anything else of the sentence runs), then the city problems, then the one building goal:
       // the care goal sets the care focus and clears the pending goal, so the building goal goes last to stay pending.
+      if (lowered.accepted && lowered.style) { limits = { ...limits, growthStyle: lowered.style }; saveLimits(); applyLimits(); }
       if (lowered.accepted && (lowered.growth || lowered.targetPopulation !== null)) {
         if (lowered.growth) { runtime.holdExpansion(lowered.growth === "PAUSE"); limits = { ...limits, expansionHeld: lowered.growth === "PAUSE" }; }
         if (lowered.targetPopulation !== null) { runtime.setGrowthSettings({ stabilizationPopulation: lowered.targetPopulation }); limits = { ...limits, targetPopulation: lowered.targetPopulation }; }
@@ -476,7 +491,7 @@ async function main(): Promise<void> {
       if (lowered.careGoal) runtime.setPendingUserCommand({ text: command.text, source: "text", structuredIntent: lowered.careGoal });
       if (lowered.buildGoal) runtime.setPendingUserCommand({ text: command.text, source: "text", structuredIntent: lowered.buildGoal });
       const acted = lowered.careGoal !== null || lowered.buildGoal !== null;
-      const detail = acted ? (runtime.getState()?.lastStatus ?? "accepted") : lowered.growth || lowered.targetPopulation !== null ? "growth setting recorded" : lowered.accepted ? "limits recorded" : "not accepted";
+      const detail = acted ? (runtime.getState()?.lastStatus ?? "accepted") : lowered.growth || lowered.targetPopulation !== null || lowered.style ? "growth setting recorded" : lowered.accepted ? "limits recorded" : "not accepted";
       send({ k: "command-result", id: command.id, ok: lowered.accepted || acted, detail, notes: lowered.notes });
       if (lowered.accepted || acted) speak([{ key: `command:${command.id}`, tone: "info", text: narrationLang === "zh"
         ? `收到指令“${command.text.slice(0, 40)}”${lowered.notes[0] ? `：${lowered.notes[0].slice(0, 80)}` : ""}` : `Instruction received: "${command.text.slice(0, 40)}"${lowered.notes[0] ? ` — ${lowered.notes[0].slice(0, 80)}` : ""}` }], true);
@@ -507,8 +522,13 @@ async function main(): Promise<void> {
     }
     // A cycle that decided to wait (nothing to build now, no land to buy) is not repeated at once: measured live 2026-10-06, a city out of land
     // ran a full world read every 7 s for nothing. The pause ends early for a player instruction, a pause or a stop.
-    if (lastOutcome === "WAIT") {
-      const until = Date.now() + (lastWaitWasQuick ? QUICK_WAIT_REST_MS : WAIT_CYCLE_REST_MS);
+    // Cycles that build nothing in a row (a replan, no feasible site, a wait) slow down step by step — 3, 6, 12, up to 30 s — so a dead end the Mayor has
+    // not recognised yet cannot spin at full speed (live 2026-10-08: REPLAN_REQUIRED every 5 s on land the roads could not reach); a built cycle resets it.
+    idleStreak = lastOutcome === "BUILD" || lastOutcome === null ? 0 : idleStreak + 1;
+    const backoff = idleStreak <= 1 ? 0 : Math.min(IDLE_BACKOFF_MAX_MS, IDLE_BACKOFF_BASE_MS * 2 ** (idleStreak - 2));
+    const rest = lastOutcome === "WAIT" ? Math.max(lastWaitWasQuick ? QUICK_WAIT_REST_MS : WAIT_CYCLE_REST_MS, backoff) : backoff;
+    if (rest > 0) {
+      const until = Date.now() + rest;
       while (Date.now() < until && !stopping && !paused && queuedCommands.length === 0 && commandsHandled === handledBefore) {
         if (Date.now() - lastSnapshotAt >= SNAPSHOT_EVERY_MS) await snapshot();
         send({ k: "cycle" }); // resting on purpose is not a stall

@@ -162,7 +162,8 @@ export type Channels =
   | "ai-mayor-status"
   | "ai-mayor-balance"
   | "ai-mayor-tick"
-  | "ai-mayor-console-state";
+  | "ai-mayor-console-state"
+  | "ai-mayor-gamebar-avatar";
 
 const electronHandler = {
   upgrade: () => ipcRenderer.invoke("quit-and-upgrade"),
@@ -203,10 +204,18 @@ const electronHandler = {
     sendLocal: (text: string) => ipcRenderer.invoke("ai-mayor-console-send-local", text),
     subtitle: (on: boolean) => ipcRenderer.invoke("ai-mayor-console-subtitle", on),
     subtitleState: () => ipcRenderer.invoke("ai-mayor-console-subtitle-state"),
+    gameBar: (on: boolean) => ipcRenderer.invoke("ai-mayor-console-gamebar", on),
+    gameBarState: () => ipcRenderer.invoke("ai-mayor-console-gamebar-state"),
+    gameBarRelease: () => ipcRenderer.invoke("ai-mayor-gamebar-release"),
+    gameBarLayout: (layout: { open: boolean; reply: boolean }) => ipcRenderer.invoke("ai-mayor-gamebar-layout", layout),
+    gameBarMove: (delta: { dx: number; dy: number }) => ipcRenderer.invoke("ai-mayor-gamebar-move", delta),
+    gameBarAvatar: () => ipcRenderer.invoke("ai-mayor-gamebar-avatar-get"),
+    avatarPick: () => ipcRenderer.invoke("ai-mayor-console-avatar-pick"),
+    avatarReset: () => ipcRenderer.invoke("ai-mayor-console-avatar-reset"),
     setTheme: (theme: string) => ipcRenderer.invoke("ai-mayor-console-theme", theme),
     updateCheck: (force?: boolean) => ipcRenderer.invoke("ai-mayor-console-update-check", force === true),
     updateInstall: () => ipcRenderer.invoke("ai-mayor-console-update-install"),
-    growth: (change: { held?: boolean; targetPopulation?: number }) => ipcRenderer.invoke("ai-mayor-console-growth", change),
+    growth: (change: { held?: boolean; targetPopulation?: number; style?: "STEADY" | "SNOWBALL" }) => ipcRenderer.invoke("ai-mayor-console-growth", change),
     gameFullscreen: () => ipcRenderer.invoke("ai-mayor-console-game-fullscreen"),
     clearLimits: () => ipcRenderer.invoke("ai-mayor-console-clear-limits"),
     open: (url: string) => ipcRenderer.invoke("ai-mayor-console-open", url),

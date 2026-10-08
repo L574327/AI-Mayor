@@ -55,7 +55,7 @@ html, body, #root { margin: 0; height: 100%; }
   .mc-home, .mc-page { display: grid; gap: 16px 20px; align-content: start; }
   .mc-home { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .mc-home > * { grid-column: 1 / -1; }
-  .mc-home:has(.mc-said) > .mc-box { grid-column: 1; order: 1; }
+  .mc-home:has(.mc-said) > .mc-details { grid-column: 1; order: 2; }
   .mc-home:has(.mc-said) > .mc-said { grid-column: 2; order: 2; align-self: start; }
   .mc-page { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
   .mc-page > :not(.mc-card) { grid-column: 1 / -1; }
@@ -129,3 +129,36 @@ html, body, #root { margin: 0; height: 100%; }
 .mc-growth { display: flex; justify-content: flex-end; align-items: center; gap: 14px; margin-top: 8px; font-size: 13px; color: var(--mc-muted);
   label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
   .mc-target { width: 88px; padding: 4px 8px; text-align: right; font-variant-numeric: tabular-nums; } }
+
+// Home: the start button, the live state, the city's figures and the growth controls.
+.mc-hero.live { border-left: 3px solid var(--mc-blue); padding-left: 14px; }
+button.mc-start { padding: 14px 34px; font-size: 17px; border-radius: 12px; min-width: 200px; box-shadow: 0 6px 18px color-mix(in srgb, var(--mc-blue) 35%, transparent); }
+.mc-live { display: inline-flex; align-items: center; gap: 10px; align-self: flex-start; padding: 6px 14px; border-radius: 999px; font-weight: 600; font-size: 15px;
+  background: var(--mc-bluebg); color: var(--mc-blue); }
+.mc-live.run { background: var(--mc-greenbg); color: var(--mc-green); }
+.mc-live.hold { background: var(--mc-amberbg); color: var(--mc-amber); }
+.mc-pulse { width: 10px; height: 10px; border-radius: 50%; background: currentColor; position: relative; }
+.mc-live.run .mc-pulse::after, .mc-live.wait .mc-pulse::after { content: ""; position: absolute; inset: -5px; border-radius: 50%; border: 2px solid currentColor; animation: mc-pulse 1.6s ease-out infinite; }
+@keyframes mc-pulse { from { transform: scale(.5); opacity: .9; } to { transform: scale(1.6); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .mc-pulse::after { animation: none !important; } }
+.mc-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.mc-tile { background: var(--mc-surface); border: 1px solid var(--mc-line); border-radius: 12px; padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 0;
+  small { color: var(--mc-muted); font-size: 12px; } strong { font-size: 20px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  em { font-style: normal; color: var(--mc-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pos { color: var(--mc-green); } .neg { color: var(--mc-red); } }
+.mc-bar { display: block; height: 4px; border-radius: 4px; background: var(--mc-raised); overflow: hidden; margin: 2px 0;
+  i { display: block; height: 100%; background: var(--mc-blue); border-radius: 4px; } }
+.mc-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 22px; background: var(--mc-surface); border: 1px solid var(--mc-line); border-radius: 12px; padding: 12px 16px; }
+.mc-control { display: flex; flex-direction: column; gap: 4px; font-size: 13px; small { color: var(--mc-muted); font-size: 12px; }
+  .mc-target { width: 110px; padding: 5px 8px; text-align: right; font-variant-numeric: tabular-nums; } }
+.mc-control.check { flex-direction: row; align-items: center; gap: 6px; cursor: pointer; padding-bottom: 6px; }
+.mc-capability { font-size: 12px; line-height: 1.6; }
+.mc-gamebar-hint { margin-top: -6px; }
+@media (max-width: 760px) { .mc-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }.mc-legal { font-size: 12px; line-height: 1.6; margin-top: 6px; }
+
+.mc-avatar-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: -4px; }
+.mc-avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; background: #141c28; box-shadow: 0 0 0 2px var(--mc-line); flex-shrink: 0; }
+.mc-avatar-row .mc-hint { flex: 1; min-width: 200px; }
+
+.mc-say-row { display: flex; gap: 10px; align-items: center; input { flex: 1; min-width: 0; padding: 9px 12px; } }
+.mc-say-result { margin-top: -8px; }

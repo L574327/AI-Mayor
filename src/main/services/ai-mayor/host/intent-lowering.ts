@@ -21,6 +21,7 @@ export type ForbidKind = "demolition" | "loan" | "zoning_change" | "road_rebuild
 export const FORBID_KINDS: readonly ForbidKind[] = ["demolition", "loan", "zoning_change", "road_rebuild", "land_purchase"];
 
 export type GrowthControl = "PAUSE" | "RESUME";
+export type GrowthStyle = "STEADY" | "SNOWBALL";
 
 export interface Instruction {
   goal: MayorStructuredGoalIntent | null;
@@ -30,6 +31,8 @@ export interface Instruction {
   growth?: GrowthControl;
   /** "Grow to 50,000": the population at which outward growth stops by itself. */
   targetPopulation?: number;
+  /** "Expand all out / snowball" or "steady, keep the money growing": the growth mode, the same switch as on the home page. */
+  style?: GrowthStyle;
   forbid: ForbidKind[];
   /** District names as the player said them, matched against the city's districts. */
   preserve: string[];
@@ -49,6 +52,7 @@ export interface Lowered {
   buildGoal: MayorStructuredGoalIntent | null;
   growth: GrowthControl | null;
   targetPopulation: number | null;
+  style: GrowthStyle | null;
   permissions: { allowLand?: boolean; allowEconomy?: boolean; preservePlayerAssets?: boolean; keepZoning?: boolean; keepRoads?: boolean };
   protectedAreas: ProtectedArea[];
   /** What the player should read: names matched, what was refused and why, what is not supported. */
@@ -173,7 +177,7 @@ export function lowerInstruction(input: {
       capabilities: productCapabilities(), evidence: emptyEvidence() });
     if (result.outcome !== "ACCEPTED") {
       notes.push(say(`这些限制没有被接受：${result.diagnostics.map((d) => `${d.code}`).join("、")}`, `These limits were not accepted: ${result.diagnostics.map((d) => d.code).join(", ")}`));
-      return { accepted: false, goal: instruction.goal, careGoal: null, buildGoal: null, growth: null, targetPopulation: null, permissions: {}, protectedAreas: [], notes, revision: input.previous };
+      return { accepted: false, goal: instruction.goal, careGoal: null, buildGoal: null, growth: null, targetPopulation: null, style: null, permissions: {}, protectedAreas: [], notes, revision: input.previous };
     }
   }
 
@@ -208,6 +212,9 @@ export function lowerInstruction(input: {
   if (growth === "PAUSE") notes.push(say("暂停扩张：不再开新片区、不买地；已有城市的问题（道路连通、垃圾、废墟、交通、服务）照常处理；取消首页的“自治·不扩张”勾选（或说“继续扩张”）即可恢复",
     "Expansion held: no new districts and no land; the city that stands is still looked after (roads, garbage, ruins, traffic, services). Untick the Autonomy / no-expansion box on the home page (or say: resume expansion) to go on"));
   if (growth === "RESUME") notes.push(say("恢复扩张：按城市需求继续开新片区", "Expansion resumed: new districts as the city needs them"));
+  const style = instruction.style === "SNOWBALL" || instruction.style === "STEADY" ? instruction.style : null;
+  if (style === "SNOWBALL") notes.push(say("扩张模式：滚雪球——有钱就建，批次按现金上限，空地不够就买地", "Growth mode: snowball — cash is spent on building as it comes, land is bought as needed"));
+  if (style === "STEADY") notes.push(say("扩张模式：稳健——边扩张边攒钱", "Growth mode: steady — the city grows while the treasury keeps growing"));
   if (targetPopulation !== null) notes.push(say(`目标人口 ${targetPopulation.toLocaleString("zh-CN")}：到达后停止向外扩张，只维护城市`, `Target population ${targetPopulation.toLocaleString("en-US")}: outward growth stops there and the Mayor keeps the city running`));
   if (growth === "PAUSE" && combined.build) notes.push(say("这句话同时要求暂停扩张和新建片区：以暂停为准，新建片区不执行", "This asks to hold expansion and to build a district: the hold wins, the district is not built"));
   const buildGoal = growth === "PAUSE" ? null : combined.build;
@@ -215,5 +222,5 @@ export function lowerInstruction(input: {
   // A goal about the city's problems: what the Mayor will do about each, in the player's language (`v2/care-focus.ts`).
   const care = careFocusFrom(combined.care);
   if (care) notes.push(...describeCarePlan(care, lang));
-  return { accepted: true, goal: buildGoal ?? combined.care, careGoal: combined.care, buildGoal, growth, targetPopulation, permissions, protectedAreas, notes, revision };
+  return { accepted: true, goal: buildGoal ?? combined.care, careGoal: combined.care, buildGoal, growth, targetPopulation, style, permissions, protectedAreas, notes, revision };
 }

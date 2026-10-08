@@ -1,7 +1,10 @@
 # AI Mayor（AI 市长）
 
-> **本产品基于 5ire 社区版，与 5ire 无关。**
+> **本产品基于 5ire 社区版（5ire Community Edition），与 5ire 不存在任何隶属或关联关系。**
 > *This product is based on 5ire Community Edition and is not affiliated with 5ire.*
+>
+> AI 市长是玩家自制的免费非官方工具，与 Paradox Interactive、Colossal Order 及《城市：天际线 2》无隶属、授权或合作关系；相关名称和商标归其各自所有者。
+> *AI Mayor is an unofficial fan-made tool, not affiliated with or endorsed by Paradox Interactive or Colossal Order; Cities: Skylines is a trademark of its owners.*
 
 《城市：天际线 II》（Cities: Skylines II）的自动市长。它接管你正在玩的城市，读地图上的问题图标，自己去修；你也可以用一句话告诉它想要什么。
 

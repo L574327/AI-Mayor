@@ -16,9 +16,15 @@ export interface TakeoverPermissions {
   allowEconomy: boolean;
   /** Never take down or rezone what the player built: ruins of the player's buildings stay, over-supplied zoning is not withdrawn. */
   preservePlayerAssets: boolean;
+  /**
+   * How the Mayor spends on growth. STEADY: it expands while the treasury keeps growing (the finance and absorption rules hold). SNOWBALL: every unit of cash
+   * that can build does — batches as large as the cash pays for, land bought whenever the reserve stands, no hold for empty stock.
+   */
+  growthStyle: GrowthStyle;
 }
+export type GrowthStyle = "STEADY" | "SNOWBALL";
 
-export const DEFAULT_PERMISSIONS: TakeoverPermissions = { allowLand: true, allowEconomy: true, preservePlayerAssets: false };
+export const DEFAULT_PERMISSIONS: TakeoverPermissions = { allowLand: true, allowEconomy: true, preservePlayerAssets: false, growthStyle: "SNOWBALL" };
 
 export type EnginePhase = "STARTING" | "WAITING_FOR_GAME" | "BACKING_UP" | "RUNNING" | "PAUSING" | "PAUSED" | "STOPPED" | "FAILED";
 
@@ -66,7 +72,7 @@ export type EngineMessage =
   /** What the player's instructions protect and allow now (the compiled revision): shown by the console. */
   | { k: "limits"; protectedAreas: string[]; permissions: TakeoverPermissions; keepZoning: boolean; keepRoads: boolean;
       /** The player's word on growth, as the engine holds it now: "autonomy, no outward expansion" and the population at which growth stops (null: the default). */
-      expansionHeld?: boolean; targetPopulation?: number | null };
+      expansionHeld?: boolean; targetPopulation?: number | null; growthStyle?: GrowthStyle };
 
 export type HostMessage =
   | { k: "pause" }
@@ -94,6 +100,8 @@ export function readPermissions(raw: string | undefined): TakeoverPermissions {
       allowLand: parsed.allowLand ?? DEFAULT_PERMISSIONS.allowLand,
       allowEconomy: parsed.allowEconomy ?? DEFAULT_PERMISSIONS.allowEconomy,
       preservePlayerAssets: parsed.preservePlayerAssets ?? DEFAULT_PERMISSIONS.preservePlayerAssets,
+      // Full expansion is the product default (the player's ruling, 2026-10-08); steady is the choice.
+      growthStyle: parsed.growthStyle === "STEADY" ? "STEADY" : "SNOWBALL",
     };
   } catch {
     return { ...DEFAULT_PERMISSIONS };

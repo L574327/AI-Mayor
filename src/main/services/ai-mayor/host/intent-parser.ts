@@ -7,7 +7,16 @@
  * when this one cannot read an instruction it says so (`understood: false`) instead of guessing.
  */
 import type { MayorStructuredGoalIntent } from "../types";
-import { combineGoals, type ForbidKind, type GrowthControl, type Instruction } from "./intent-lowering";
+import { combineGoals, type ForbidKind, type GrowthControl, type GrowthStyle, type Instruction } from "./intent-lowering";
+
+/** Words of a player who wants the city to grow outward ("扩展", "别发呆", "动起来", "把城市搞大"): read as growth, never as anything else. */
+export const GROWTH_WISH_ZH = /人口|发展|扩张|扩建|扩展|扩大|铺开|长大|增长|做大|变大|大一点|规模|面积|地盘|多建|多盖|新区|往外|动起来|发呆|摆烂|干活|开工|快点建|继续建|接着建|建起来|搞大|买地|建设(?:一个|个)?\S{0,6}城市|建(?:一个|个)\S{0,6}城市/;
+export const GROWTH_WISH_EN = /grow|population|expand|develop|bigger|more people|get (?:to work|going|building)|stop idling|buy (?:more )?land|build (?:me )?a(?:n)? \w+ city/;
+/** "全力 / 滚雪球 / 有钱就建": the snowball mode; "稳健 / 攒钱": the steady one. */
+const SNOWBALL_ZH = /全力|拼命|使劲|狠狠|最快|最大速度|滚雪球|有钱就(?:建|花|扩|造)|别(?:存|攒)钱|不要(?:存|攒)钱|钱(?:都|全)花|把钱花|疯狂|大刀阔斧|一直扩|别停|不要停|不停/;
+const SNOWBALL_EN = /all[- ]out|full speed|as fast as|snowball|spend (?:the|all the|your) (?:money|cash)|do not stop|don't stop|non[- ]?stop/;
+const STEADY_ZH = /稳健|稳一点|稳着|慢一点|攒钱|存钱|卷钱|别乱花|省着/;
+const STEADY_EN = /steady|save (?:the )?money|keep (?:the )?money|slow(?:er)? down/;
 
 export interface ParsedInstruction {
   understood: boolean;
@@ -52,6 +61,21 @@ export function compassOf(text: string): NonNullable<NonNullable<MayorStructured
   const table: Record<string, "N" | "NE" | "E" | "SE" | "S" | "SW" | "W" | "NW"> = { 东北: "NE", 西北: "NW", 东南: "SE", 西南: "SW", 东: "E", 西: "W", 南: "S", 北: "N",
     northeast: "NE", northwest: "NW", southeast: "SE", southwest: "SW", north: "N", south: "S", east: "E", west: "W" };
   return table[word] ?? null;
+}
+
+/**
+ * "Mayor, stop" / "继续干活": a word to the Mayor itself, not to its plans — the player can always halt it by voice (the player's ruling, 2026-10-08). Read
+ * before anything else and acted on at once (pause or resume, no cycle needed). "先别扩张" is a hold on growth, not this; "不要停" is not a stop.
+ */
+export function mayorControlOf(raw: string): "PAUSE" | "RESUME" | null {
+  const text = raw.trim().toLowerCase().replace(/[，,。.！!？?\s]+$/g, "");
+  if (!text || /不要停|别停|不停|don'?t stop|do not stop/.test(text)) return null;
+  const growthWord = /扩张|扩建|扩展|发展|新区|买地|建设|expan|grow|develop/;
+  if (/^(?:市长)?(?:你)?(?:先|快)?(?:暂停|停一下|停一停|停下来|停下|停手|停|歇一下|休息一下|别动了|不要动了|住手|别干了|别搞了)(?:一下|吧|了)?$/.test(text) && !growthWord.test(text)) return "PAUSE";
+  if (/^(?:mayor,? ?)?(?:stop|pause|hold on|wait)(?: (?:now|for now|please|a moment))?$/.test(text)) return "PAUSE";
+  if (/^(?:市长)?(?:你)?(?:继续|接着干|继续干活|继续工作|恢复工作|开工|干活)(?:吧|了)?$/.test(text)) return "RESUME";
+  if (/^(?:mayor,? ?)?(?:resume|continue|carry on|go on|back to work)(?: please)?$/.test(text)) return "RESUME";
+  return null;
 }
 
 export function parseInstruction(raw: string): ParsedInstruction {
@@ -116,9 +140,13 @@ export function parseInstruction(raw: string): ParsedInstruction {
   const pauseEn = /\b(?:stop|pause|halt|hold|freeze)\s+(?:all\s+|any\s+|further\s+|more\s+)?(?:the\s+)?(?:expan\w*|expanding|growing|growth|building(?: outward)?|development)\b|\bno more (?:expansion|expanding|new districts)\b|\bdon'?t expand\b/g;
   const resumeZh = /(?:继续|恢复|重新开始|接着)(?:往外)?(?:扩张|扩建|扩展|开发|建设|发展)/g;
   const resumeEn = /\b(?:resume|continue|restart|keep)\s+(?:the\s+)?(?:expan\w*|growing|growth|building|development)\b/g;
-  let rest2 = lower.replace(/([零一二两三四五六七八九十百]+)(万|千)/g, (whole, digits: string, unit: string) => { const value = zhNumber(digits); return value === null ? whole : `${value}${unit}`; });
+  // "不要停止扩张" / "别停下" is the opposite of a hold: it reads as "go on" before the hold patterns can see "停止扩张".
+  const unNegated = lower.replace(/(?:不要|别|不许|不准|不能)(?:再)?(?:停止|停下|暂停|停)(?:下来)?/g, "继续");
+  let rest2 = unNegated.replace(/([零一二两三四五六七八九十百]+)(万|千)/g, (whole, digits: string, unit: string) => { const value = zhNumber(digits); return value === null ? whole : `${value}${unit}`; });
   if (pauseZh.test(rest2) || pauseEn.test(rest2)) growth = "PAUSE";
   else if (resumeZh.test(rest2) || resumeEn.test(rest2)) growth = "RESUME";
+  const lowered = text.toLowerCase();
+  const style: GrowthStyle | undefined = growth === "PAUSE" ? undefined : has(lowered, SNOWBALL_EN, SNOWBALL_ZH) ? "SNOWBALL" : has(lowered, STEADY_EN, STEADY_ZH) ? "STEADY" : undefined;
   for (const pattern of [pauseZh, pauseEn, resumeZh, resumeEn]) { pattern.lastIndex = 0; rest2 = rest2.replace(pattern, " "); }
   let targetPopulation: number | undefined;
   const targetZh = /(?:人口(?:目标)?(?:定为|设为|到|达到|发展到)?|发展到|达到|长到|做到|到)\s*(\d+(?:\.\d+)?)\s*(万|千)?\s*(?:人口|人|居民)?/;
@@ -213,7 +241,7 @@ export function parseInstruction(raw: string): ParsedInstruction {
     else if (has(clause, /industr|factor/, /工业|工厂/)) { type = "EXPAND_INDUSTRIAL"; what = say("扩建工业", "expand industry"); }
     else if (has(clause, /office/, /办公/)) { type = "EXPAND_OFFICE"; what = say("扩建办公", "expand offices"); }
     else if (has(clause, /road network|new roads?|street|grid/, /路网|街道|修路|新路/)) { type = "ESTABLISH_ROAD_NETWORK"; what = say("扩展路网", "extend the road network"); }
-    else if (has(clause, /grow|population|expand|develop|bigger|more people|build (me )?a(n)? \w+ city/, /人口|发展|扩张|扩建|长大|增长|做大|变大|大一点|规模|建设(?:一个|个)?\S{0,6}城市|建(?:一个|个)\S{0,6}城市/)) { type = "GROW_POPULATION"; what = say("发展人口", "grow the population"); }
+    else if (has(clause, GROWTH_WISH_EN, GROWTH_WISH_ZH) || has(clause, SNOWBALL_EN, SNOWBALL_ZH)) { type = "GROW_POPULATION"; what = say("扩张城市", "grow the city"); }
     if (!type) return null;
     if (compass && (type.startsWith("EXPAND_") || type === "GROW_POPULATION")) scope.direction = compass;
     const extras = [
@@ -234,7 +262,8 @@ export function parseInstruction(raw: string): ParsedInstruction {
   });
   const read = pieces.map(readGoal).filter((entry): entry is NonNullable<ReturnType<typeof readGoal>> => entry !== null);
   // Clauses with real words that gave nothing: the part of the sentence this reader did not understand (filler and politeness are not such a part).
-  const filler = /^(?:[\s吧了啊呀嘛呢哦的一下请帮我你给把都先再就也还要好行麻烦谢谢处理解决弄搞做一点下]|please|thanks|ok|okay|now|the|a|and|just|all|them|it)*$/i;
+  // "继续" is what is left of "不要停" (read above); "那么多空地" only says why.
+  const filler = /^(?:[\s吧了啊呀嘛呢哦的一下请帮我你给把都先再就也还要好行麻烦谢谢处理解决弄搞做一点下继续那么这多空地明有方是快赶紧直接]|please|thanks|ok|okay|now|the|a|and|just|all|them|it)*$/i;
   const unread = clauses.filter((clause) => !filler.test(clause) && readGoal(clause) === null).length;
   // The same goal said twice in one sentence is one goal.
   const seen = new Set<string>();
@@ -265,10 +294,12 @@ export function parseInstruction(raw: string): ParsedInstruction {
 
   // Every problem named across the clauses is one care goal (as the compiler would make it), the first building goal follows it.
   const combined = combineGoals(goals.map((entry) => entry.goal));
+  // The player asked for growth: a standing "no expansion" is lifted by it (what is said last is what holds).
+  if (!growth && combined.build && (combined.build.type === "GROW_POPULATION" || combined.build.type.startsWith("EXPAND_"))) growth = "RESUME";
   const ordered = [combined.care, combined.build].filter((goal): goal is MayorStructuredGoalIntent => goal !== null);
   const first = ordered[0] ?? null;
   const instruction: Instruction = { goal: first, ...(ordered.length > 1 ? { goals: ordered.slice(1) } : {}),
-    ...(growth ? { growth } : {}), ...(targetPopulation !== undefined ? { targetPopulation } : {}),
+    ...(growth ? { growth } : {}), ...(targetPopulation !== undefined ? { targetPopulation } : {}), ...(style ? { style } : {}),
     forbid: [...new Set(forbid)], preserve: [...new Set(preserve)], unsupported };
   const FORBID_ZH: Record<ForbidKind, string> = { demolition: "不拆除", loan: "不贷款", zoning_change: "不改区划", road_rebuild: "不改路", land_purchase: "不买地" };
   const FORBID_EN: Record<ForbidKind, string> = { demolition: "no demolition", loan: "no loans", zoning_change: "no rezoning", road_rebuild: "no road changes", land_purchase: "no land purchase" };
@@ -276,6 +307,7 @@ export function parseInstruction(raw: string): ParsedInstruction {
   const control = [
     growth === "PAUSE" ? say("暂停扩张（继续处理城市问题）", "hold expansion (the city's problems are still handled)") : growth === "RESUME" ? say("恢复扩张", "resume expansion") : null,
     targetPopulation !== undefined ? say(`目标人口 ${targetPopulation.toLocaleString("zh-CN")}`, `target population ${targetPopulation.toLocaleString("en-US")}`) : null,
+    style === "SNOWBALL" ? say("滚雪球模式：有钱就建", "snowball mode: cash goes into building") : style === "STEADY" ? say("稳健模式：边扩张边攒钱", "steady mode: grow while saving") : null,
   ].filter((item): item is string => !!item);
 
   if (goals.length === 0) {

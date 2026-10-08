@@ -76,11 +76,17 @@ describe("V2 P3: density by unlock and vacancy, low density on a quota", () => {
     expect(chooseResidentialDensity({ stage: "S0", lowDensityShareSoFar: null,
       densities: ladder(state(true, 0.1, 50), state(false, null, null), state(false, null, null)) }).density).toBe("low");
     const free = ladder(state(true, 0.02, 100), state(true, 0.7, 0), state(true, 0.6, 0));
+    // A low density the game asks for (bar at 100) is built over the quota when nothing denser is open (the player's ruling, 2026-10-08: live 2026-10-07 the
+    // quota held the homes back for 286 cycles beside a full low-density bar).
     expect(chooseResidentialDensity({ stage: "S3", lowDensityShareSoFar: 0.1, densities: free }).density).toBe("low");
-    expect(chooseResidentialDensity({ stage: "S3", lowDensityShareSoFar: LOW_DENSITY_QUOTA_SHARE, densities: free })).toMatchObject({ density: null, reason: expect.stringMatching(/quota/) });
-    // The quota holds from S1 on (live 2026-10-05: 90% of 4,324 homes were low density at 13,558 people), never in the opening S0.
-    expect(chooseResidentialDensity({ stage: "S2", lowDensityShareSoFar: 0.9, densities: free })).toMatchObject({ density: null, reason: expect.stringMatching(/quota/) });
-    expect(chooseResidentialDensity({ stage: "S1", lowDensityShareSoFar: 0.9, densities: free })).toMatchObject({ density: null, reason: expect.stringMatching(/quota/) });
+    expect(chooseResidentialDensity({ stage: "S3", lowDensityShareSoFar: LOW_DENSITY_QUOTA_SHARE, densities: free })).toMatchObject({ density: "low", reason: expect.stringMatching(/quota yields/) });
+    expect(chooseResidentialDensity({ stage: "S2", lowDensityShareSoFar: 0.9, densities: free })).toMatchObject({ density: "low", reason: expect.stringMatching(/asks for low density/) });
+    // Asked for only a little: the quota still holds from S1 on (live 2026-10-05: 90% of 4,324 homes were low density at 13,558 people), never in the opening S0.
+    const mild = ladder(state(true, 0.02, 30), state(true, 0.7, 0), state(true, 0.6, 0));
+    expect(chooseResidentialDensity({ stage: "S2", lowDensityShareSoFar: 0.9, densities: mild })).toMatchObject({ density: null, reason: expect.stringMatching(/quota/) });
+    expect(chooseResidentialDensity({ stage: "S1", lowDensityShareSoFar: 0.9, densities: mild })).toMatchObject({ density: null, reason: expect.stringMatching(/quota/) });
+    // Snowball: any demand at all is enough.
+    expect(chooseResidentialDensity({ stage: "S2", lowDensityShareSoFar: 0.9, densities: mild, eager: true }).density).toBe("low");
     expect(chooseResidentialDensity({ stage: "S0", lowDensityShareSoFar: 0.9, densities: ladder(state(true, 0.1, 50), state(false, null, null), state(false, null, null)) }).density).toBe("low");
     expect(chooseResidentialDensity({ stage: "S2", lowDensityShareSoFar: 0.1, densities: free }).density).toBe("low");
   });
@@ -419,12 +425,26 @@ describe("V2 in the district builder", () => {
     expect(zones).toHaveLength(0);
   });
 
-  test("the live save: medium stands 62% empty with nil demand and low density already holds 75% of the zoning: no more low density is laid, the city waits for medium to fill", async () => {
+  test("the live save: medium stands 62% empty with nil demand and low density already holds 75% of the zoning: the game still asks for low density, so it is laid (the quota yields; the city does not wait for medium)", async () => {
     const zones: string[] = [];
     const result = await new DistrictBuilder(harness({ zones, mix: mixWith(byDensity([43_585, 1_589, 100], [14_512, 10_059, 0])) }), { maximumSitesPerCycle: 1 }).runCycle(cycleInput());
-    expect(zones.some((zone) => zone === "residential:LOW")).toBe(false);
+    expect(zones.some((zone) => zone === "residential:LOW")).toBe(true);
     expect(zones.some((zone) => zone === "residential:MEDIUM")).toBe(false);
-    expect(result.notes.join(" | ")).toMatch(/quota/);
+    expect(result.notes.join(" | ")).toMatch(/quota yields/);
+    // Asked for only a little (bar at 30): the quota still holds and the city waits for medium to fill.
+    const mild: string[] = [];
+    const held = await new DistrictBuilder(harness({ zones: mild, mix: mixWith(byDensity([43_585, 1_589, 30], [14_512, 10_059, 0])) }), { maximumSitesPerCycle: 1 }).runCycle(cycleInput());
+    expect(mild.some((zone) => zone === "residential:LOW")).toBe(false);
+    expect(held.notes.join(" | ")).toMatch(/quota/);
+    // Snowball (the player's mode switch): any demand builds, and the batch is what the cash pays for, not a seed.
+    const before = process.env.AI_MAYOR_GROWTH_STYLE;
+    process.env.AI_MAYOR_GROWTH_STYLE = "SNOWBALL";
+    try {
+      const eager: string[] = [];
+      const snow = await new DistrictBuilder(harness({ zones: eager, mix: mixWith(byDensity([43_585, 1_589, 30], [14_512, 10_059, 0])) }), { maximumSitesPerCycle: 1 }).runCycle(cycleInput());
+      expect(eager.some((zone) => zone === "residential:LOW")).toBe(true);
+      expect(snow.notes.join(" | ")).not.toMatch(/seed batch/);
+    } finally { if (before === undefined) delete process.env.AI_MAYOR_GROWTH_STYLE; else process.env.AI_MAYOR_GROWTH_STYLE = before; }
     // A city whose low density is small (10% of the zoning) and nearly full, with medium 30% empty, still gets its low density.
     const small: string[] = [];
     await new DistrictBuilder(harness({ zones: small, mix: mixWith(byDensity([1_000, 20, 100], [3_000, 900, 0], [6_000, 0, 0])) }), { maximumSitesPerCycle: 1 }).runCycle(cycleInput());

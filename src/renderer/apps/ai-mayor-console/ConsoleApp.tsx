@@ -43,7 +43,7 @@ export default function ConsoleApp() {
   const [limitText, setLimitText] = useState("");
   const [mode, setMode] = useState<Mode>("assisted");
   const [takeoverOpen, setTakeoverOpen] = useState(false);
-  const [permissions, setPermissions] = useState<TakeoverPermissions>({ allowLand: true, allowEconomy: true, preservePlayerAssets: false });
+  const [permissions, setPermissions] = useState<TakeoverPermissions>({ allowLand: true, allowEconomy: true, preservePlayerAssets: false, growthStyle: "SNOWBALL" });
   const [text, setText] = useState("");
   const [parsed, setParsed] = useState<Parsed | null>(null);
   const [assist, setAssist] = useState<{ code: string; requestText: string } | null>(null);
@@ -56,6 +56,15 @@ export default function ConsoleApp() {
   useEffect(() => { try { window.localStorage.setItem("ai-mayor-console-commentary", commentaryOn ? "on" : "off"); } catch { /* */ } }, [commentaryOn]);
   const [copied, setCopied] = useState(false);
   const [subtitleOn, setSubtitleOn] = useState(true);
+  const [gameBarOn, setGameBarOn] = useState(true);
+  // The game button's picture (chosen here: a dialog opened from the always-on-top button sat behind the game).
+  const [avatar, setAvatar] = useState<string | null>(null);
+  const [avatarNote, setAvatarNote] = useState("");
+  useEffect(() => { void api().aiMayorConsole.gameBarAvatar?.().then((url: string | null) => setAvatar(url ?? null)); }, []);
+  const pickAvatar = () => void api().aiMayorConsole.avatarPick?.().then((out: { ok: boolean; avatar?: string; detail?: string }) => {
+    if (out?.ok && out.avatar) { setAvatar(out.avatar); setAvatarNote(""); } else if (out?.detail && out.detail !== "canceled") setAvatarNote(out.detail);
+  });
+  const resetAvatar = () => void api().aiMayorConsole.avatarReset?.().then(() => { setAvatar(null); setAvatarNote(""); });
   // Growth: "autonomy, no outward expansion" and the population at which growth stops. The engine holds them (and keeps them across restarts); the box shows what it holds.
   const [targetText, setTargetText] = useState("");
   const [growthNote, setGrowthNote] = useState(false);
@@ -73,9 +82,9 @@ export default function ConsoleApp() {
   const [updateDismissed, setUpdateDismissed] = useState(false);
   const checkUpdate = useCallback((force: boolean) => {
     setUpdateBusy("checking"); setUpdateMessage("");
-    void api().aiMayorConsole.updateCheck?.(force).then((out: { ok: boolean; verdict: UpdateInfo | null }) => {
+    void api().aiMayorConsole.updateCheck?.(force).then((out: { ok: boolean; verdict: UpdateInfo | null; error?: string }) => {
       if (out?.verdict) setUpdate(out.verdict);
-      if (force) setUpdateMessage(!out?.ok ? "failed" : out.verdict?.kind === "AVAILABLE" ? "" : "latest");
+      if (force) setUpdateMessage(!out?.ok ? `failed:${out?.error ?? ""}` : out.verdict?.kind === "AVAILABLE" ? "" : "latest");
     }).finally(() => setUpdateBusy(null));
   }, []);
   useEffect(() => { checkUpdate(false); const timer = window.setInterval(() => checkUpdate(false), 6 * 60 * 60_000); return () => window.clearInterval(timer); }, [checkUpdate]);
@@ -92,6 +101,7 @@ export default function ConsoleApp() {
     return () => window.clearInterval(timer);
   }, []);
   useEffect(() => { void api().aiMayorConsole.subtitleState?.().then((on: boolean) => setSubtitleOn(on !== false)); }, []);
+  useEffect(() => { void api().aiMayorConsole.gameBarState?.().then((on: boolean) => setGameBarOn(on !== false)); }, []);
   const [saved, setSaved] = useState(false);
   const [apiForm, setApiForm] = useState<{ preset: ProviderPreset; baseUrl: string; model: string; apiKey: string }>({ preset: "auto", baseUrl: "", model: "", apiKey: "" });
   const [balance, setBalance] = useState<Balance | null>(null);
@@ -190,32 +200,67 @@ export default function ConsoleApp() {
     ? <button type="button" disabled={busy} onClick={() => void run(() => api().aiMayorConsole.pause())}>{t("action.pause")}</button>
     : phase === "PAUSED" || phase === "PAUSING"
       ? <button type="button" className="primary" disabled={busy || phase === "PAUSING"} onClick={() => void run(() => api().aiMayorConsole.resume())}>{phase === "PAUSING" ? t("phase.PAUSING") : t("action.resume")}</button>
-      : active ? <button type="button" disabled>{t(`phase.${phase}` as ConsoleKey)}</button>
-        : <button type="button" className="primary big" disabled={busy || !connected} onClick={() => setTakeoverOpen(true)}>{t("action.takeover")}</button>;
+      : <button type="button" disabled>{t(`phase.${phase}` as ConsoleKey)}</button>;
 
   // Stopping the Mayor is on the home page too, not only at the bottom of Settings: the player must be able to end the takeover where they started it.
   const stopButton = active ? <button type="button" className="ghost danger-text" disabled={busy} onClick={() => void run(() => api().aiMayorConsole.stop())}>{t("action.stop")}</button> : null;
-  const switchRow = (field: keyof TakeoverPermissions, title: ConsoleKey, desc: ConsoleKey, value: TakeoverPermissions, onChange: (next: TakeoverPermissions) => void) => (
+  const switchRow = (field: "allowLand" | "allowEconomy" | "preservePlayerAssets", title: ConsoleKey, desc: ConsoleKey, value: TakeoverPermissions, onChange: (next: TakeoverPermissions) => void) => (
     <label key={field} className="mc-row-setting"><span><strong>{t(title)}</strong><small>{t(desc)}</small></span>
       <input type="checkbox" className="mc-switch" checked={value[field]} onChange={(event) => onChange({ ...value, [field]: event.target.checked })} /></label>
   );
+  // Buying land and adjusting the economy are always allowed (a spoken "no loans / don't buy land" still narrows them); the player picks the growth mode instead.
+  const styleOf = (value: TakeoverPermissions) => (value.growthStyle === "SNOWBALL" ? "SNOWBALL" : "STEADY");
   const scopeRows = (value: TakeoverPermissions, onChange: (next: TakeoverPermissions) => void) => (
-    <>{switchRow("allowLand", "take.land", "take.land.desc", value, onChange)}{switchRow("allowEconomy", "take.economy", "take.economy.desc", value, onChange)}
+    <>
+      <div className="mc-row-setting"><span><strong>{t("take.style")}</strong><small>{t(styleOf(value) === "SNOWBALL" ? "take.style.snowball.desc" : "take.style.steady.desc")}</small></span>
+        <div className="mc-segment" role="radiogroup">
+          {(["STEADY", "SNOWBALL"] as const).map((style) => (
+            <button key={style} type="button" role="radio" aria-checked={styleOf(value) === style} className={styleOf(value) === style ? "on" : ""}
+              onClick={() => onChange({ ...value, allowLand: true, allowEconomy: true, growthStyle: style })}>{t(style === "SNOWBALL" ? "take.style.snowball" : "take.style.steady")}</button>
+          ))}
+        </div></div>
       {switchRow("preservePlayerAssets", "take.preserve", "take.preserve.desc", value, onChange)}</>
   );
   const flashSaved = () => { setSaved(true); window.setTimeout(() => setSaved(false), 1500); };
 
+  // Home: one start button; once the Mayor is on, an unmistakable live state, the city's figures, the growth controls and what the Mayor said.
+  const styleNow = state?.growth?.style ?? permissions.growthStyle ?? "SNOWBALL";
+  const setStyle = (style: "STEADY" | "SNOWBALL") => {
+    setPermissions((previous) => ({ ...previous, growthStyle: style }));
+    void api().aiMayorConsole.growth?.({ style }).then(() => { setGrowthNote(true); window.setTimeout(() => setGrowthNote(false), 1800); });
+  };
+  // One line to speak to the Mayor from the console (the game button is the other way): the same road as the game button, local reading first.
+  const sendLine = async () => { setBusy(true); try { finish(await api().aiMayorConsole.interpret(text)); } finally { setBusy(false); } };
+  const startNow = () => void run(() => api().aiMayorConsole.takeOver({ ...permissions, allowLand: true, allowEconomy: true, growthStyle: styleNow }));
+  const liveText = phase === "RUNNING" ? t("home.live") : phase === "PAUSED" || phase === "PAUSING" ? t("home.live.paused") : t("home.live.starting");
+  const iconTotal = Object.entries(snapshot?.icons ?? {}).filter(([type, count]) => count > 0 && !NOT_A_PROBLEM_ICON.test(type)).reduce((sum, [, count]) => sum + count, 0);
+  const share = (have: number | null | undefined, need: number | null | undefined) => (have && need ? Math.min(100, Math.round((have / need) * 100)) : null);
+  const targetShown = targetHeld ?? 100_000;
+  const tile = (label: ConsoleKey, value: string, sub?: string | null, tone?: "pos" | "neg" | "", bar?: number | null) => (
+    <div className="mc-tile"><small>{t(label)}</small><strong className={`num ${tone ?? ""}`}>{value}</strong>
+      {bar !== undefined && bar !== null ? <span className="mc-bar"><i style={{ width: `${bar}%` }} /></span> : null}
+      {sub ? <em>{sub}</em> : null}</div>
+  );
   const home = (
     <div className="mc-home">
-      <section className="mc-hero">
+      <section className={`mc-hero${active ? " live" : ""}`}>
         <div className="mc-chips">
           <span className={`mc-chip ${connected ? "ok" : state?.gameConnection === "NOT_RUNNING" ? "bad" : ""}`}>{t(connected ? "conn.connected" : state?.gameConnection === "NOT_RUNNING" ? "conn.not_running" : "conn.unknown")}</span>
-          <span className={`mc-chip ${phase === "RUNNING" ? "run" : phase === "FAILED" ? "bad" : phase === "PAUSED" ? "warn" : ""}`}>{t(`phase.${phase}` as ConsoleKey)}</span>
           {snapshot?.gameDateTime ? <span className="mc-chip">{snapshot.gameDateTime}</span> : null}
         </div>
         <h1>{snapshot?.cityName ?? BRAND.name[lang]}</h1>
-        <p className={`mc-lead${fresh ? ` mc-say ${fresh.tone ?? ""}` : ""}`} aria-live="polite">{active ? (fresh ? fresh.text : `${t("hero.doing")}：${doing}`) : connected ? t("hero.idle") : t("hero.no_game")}</p>
-        <div className="mc-hero-action">{mainButton}{stopButton}</div>
+        {active ? (
+          <>
+            <div className={`mc-live ${phase === "RUNNING" ? "run" : phase === "PAUSED" || phase === "PAUSING" ? "hold" : "wait"}`}><span className="mc-pulse" />{liveText}</div>
+            <p className={`mc-lead${fresh ? ` mc-say ${fresh.tone ?? ""}` : ""}`} aria-live="polite">{fresh ? fresh.text : `${t("hero.doing")}：${doing}`}</p>
+            <div className="mc-hero-action">{mainButton}{stopButton}</div>
+          </>
+        ) : (
+          <>
+            <p className="mc-lead">{connected ? t("home.start.desc") : t("hero.no_game")}</p>
+            <div className="mc-hero-action"><button type="button" className="primary mc-start" disabled={busy || !connected} onClick={startNow}>{t("home.start")}</button></div>
+          </>
+        )}
       </section>
       {update?.kind === "AVAILABLE" && !updateDismissed ? (
         <div className="mc-notice amber mc-update">
@@ -229,74 +274,61 @@ export default function ConsoleApp() {
       ) : null}
       {notices.map((notice, index) => <div key={index} className={`mc-notice ${notice.tone}`}>{notice.text}</div>)}
       {snapshot ? (
-        <section className="mc-numbers">
-          <div><small>{t("metric.population")}</small><strong className="num">{fmt(snapshot.population, lang)}</strong></div>
-          <div><small>{t("metric.money")}</small><strong className="num">{fmt(snapshot.treasury, lang)}</strong></div>
-          <div><small>{t("metric.balance")}</small><strong className={`num ${(snapshot.monthlyBalance ?? 0) >= 0 ? "pos" : "neg"}`}>{fmt(snapshot.monthlyBalance, lang)}</strong></div>
-          <div><small>{t("metric.traffic")}</small><strong className="num">{snapshot.traffic ? `${Math.round(snapshot.traffic.flowPercent)}%` : "—"}</strong></div>
+        <section className="mc-tiles">
+          {tile("metric.population", fmt(snapshot.population, lang), `${t("metric.target")} ${fmt(targetShown, lang)}`, "", share(snapshot.population, targetShown))}
+          {tile("metric.money", fmt(snapshot.treasury, lang))}
+          {tile("metric.balance", fmt(snapshot.monthlyBalance, lang), null, (snapshot.monthlyBalance ?? 0) >= 0 ? "pos" : "neg")}
+          {tile("metric.traffic", snapshot.traffic ? `${Math.round(snapshot.traffic.flowPercent)}%` : "—")}
+          {tile("metric.milestone", snapshot.milestone !== null ? String(snapshot.milestone) : "—", snapshot.xp !== null && snapshot.nextMilestoneXp ? `${fmt(snapshot.xp, lang)} / ${fmt(snapshot.nextMilestoneXp, lang)} XP` : null, "", share(snapshot.xp, snapshot.nextMilestoneXp))}
+          {tile("metric.power", snapshot.electricity?.production != null ? fmt(snapshot.electricity.production, lang) : "—", snapshot.electricity?.consumption != null ? `${t("metric.used")} ${fmt(snapshot.electricity.consumption, lang)}` : null, (snapshot.electricity?.production ?? 0) >= (snapshot.electricity?.consumption ?? 0) ? "" : "neg")}
+          {tile("metric.water", snapshot.water?.capacity != null ? fmt(snapshot.water.capacity, lang) : "—", snapshot.water?.consumption != null ? `${t("metric.used")} ${fmt(snapshot.water.consumption, lang)}` : null, (snapshot.water?.capacity ?? 0) >= (snapshot.water?.consumption ?? 0) ? "" : "neg")}
+          {tile("metric.icons", fmt(iconTotal, lang), issues[0] ? `${iconName(issues[0][0], lang)} × ${issues[0][1]}` : null, iconTotal > 0 ? "neg" : "pos")}
         </section>
       ) : null}
-      {commentaryOn && said.length > 1 ? (
+      <section className="mc-controls">
+        <div className="mc-control"><small>{t("take.style")}</small>
+          <div className="mc-segment" role="radiogroup">
+            {(["SNOWBALL", "STEADY"] as const).map((style) => (
+              <button key={style} type="button" role="radio" aria-checked={styleNow === style} className={styleNow === style ? "on" : ""} title={t(style === "SNOWBALL" ? "take.style.snowball.desc" : "take.style.steady.desc")}
+                onClick={() => setStyle(style)}>{t(style === "SNOWBALL" ? "take.style.snowball" : "take.style.steady")}</button>
+            ))}
+          </div></div>
+        <label className="mc-control" title={t("growth.target.tip")}><small>{t("growth.target")}</small>
+          <input type="text" inputMode="numeric" className="mc-target" value={targetText} placeholder="100000" disabled={!active}
+            onChange={(event) => setTargetText(event.target.value.replace(/[^\d]/g, "").slice(0, 7))}
+            onBlur={() => { const value = Number(targetText); if (targetText && value >= 1000) sendGrowth({ targetPopulation: value }); }}
+            onKeyDown={(event) => { if (event.key === "Enter") (event.target as HTMLInputElement).blur(); }} /></label>
+        <label className="mc-control check" title={t("growth.hold.tip")}><input type="checkbox" checked={heldNow} disabled={!active} onChange={(event) => sendGrowth({ held: event.target.checked })} /> {t("growth.hold")}</label>
+        <label className="mc-control check" title={t("take.preserve.desc")}><input type="checkbox" checked={permissions.preservePlayerAssets} disabled={busy}
+          onChange={(event) => { const next = { ...permissions, preservePlayerAssets: event.target.checked }; setPermissions(next); if (active) void run(() => api().aiMayorConsole.setPermissions(next)); }} /> {t("take.preserve")}</label>
+        {growthNote ? <span className="mc-hint pos">{t("growth.saved")}</span> : null}
+      </section>
+      <section className="mc-say-row">
+        <input value={text} placeholder={t("home.say.placeholder")} aria-label={t("box.title")} disabled={!active} onChange={(event) => setText(event.target.value)}
+          onKeyDown={(event) => { if (event.key === "Enter" && text.trim() && !busy) { event.preventDefault(); void sendLine(); } }} />
+        <button type="button" className="primary" disabled={busy || !text.trim() || !active} onClick={() => void sendLine()}>{t("box.send")}</button>
+      </section>
+      {result ? <p className={`mc-hint ${result.ok ? "pos" : "neg"} mc-say-result`}>{result.ok ? (result.notes[0] ?? t("result.sent")) : `${t("result.failed")}${result.detail}`}</p> : null}
+      {limitChips.length > 0 ? (
+        <div className="mc-limits">
+          <small>{t("limits.title")}</small>
+          {limitChips.map((chip) => <span key={chip} className="mc-chip">{chip}</span>)}
+          <button type="button" className="link" disabled={busy || !active} onClick={() => void run(() => api().aiMayorConsole.clearLimits())}>{t("limits.clear")}</button>
+        </div>
+      ) : null}
+      <div className="mc-avatar-row">
+        <img className="mc-avatar" src={avatar ?? BRAND.logo} alt="" />
+        <span className="mc-hint">{t("home.gamebar.hint")}</span>
+        <button type="button" className="small" onClick={pickAvatar}>{t("home.avatar.pick")}</button>
+        {avatar ? <button type="button" className="small ghost" onClick={resetAvatar}>{t("home.avatar.reset")}</button> : null}
+        {avatarNote ? <span className="mc-hint neg">{avatarNote}</span> : null}
+      </div>
+      {said.length > 1 ? (
         <section className="mc-said">
           <div className="mc-said-head"><h2>{t("say.title")}</h2></div>
           <ul>{[...said].reverse().slice(1, 7).map((line, index) => <li key={index} className={line.tone ?? ""}><time>{new Date(line.at).toLocaleTimeString()}</time>{line.text}</li>)}</ul>
         </section>
       ) : null}
-      <section className="mc-box">
-        <div className="mc-box-head">
-          <h2>{t("box.title")}</h2>
-          {mode === "api" && balanceText ? <span className="mc-hint">{balanceText}</span> : null}
-          <div className="mc-segment" role="tablist">
-            {(["api", "assisted"] as const).map((value) => (
-              <button key={value} type="button" role="tab" aria-selected={mode === value} className={mode === value ? "on" : ""} title={t(value === "api" ? "box.mode.api.tip" : "box.mode.assisted.tip")}
-                onClick={() => { setMode(value); setAssist(null); void api().aiMayorConsole.languageSet({ mode: value }); }}>{t(value === "api" ? "box.mode.api" : "box.mode.assisted")}</button>
-            ))}
-          </div>
-        </div>
-        <div className="mc-input">
-          <textarea rows={2} value={text} placeholder={t("box.placeholder")} aria-label={t("box.title")} onChange={(event) => { setText(event.target.value); setAssist(null); }}
-            onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); if (mode === "api" && language?.hasKey) void sendApi(); else if (parsed?.understood) void sendLocal(); } }} />
-          {mode === "api" && language?.hasKey
-            ? <button type="button" className="primary" disabled={busy || !text.trim() || !active} onClick={() => void sendApi()}>{t("box.send")}</button>
-            : <button type="button" className="primary" disabled={busy || !parsed?.understood || !active} onClick={() => void sendLocal()}>{t("box.send")}</button>}
-        </div>
-        <div className="mc-growth">
-          {growthNote ? <span className="mc-hint pos">{t("growth.saved")}</span> : null}
-          <label title={t("growth.hold.tip")}><input type="checkbox" checked={heldNow} disabled={!active} onChange={(event) => sendGrowth({ held: event.target.checked })} /> {t("growth.hold")}</label>
-          <label title={t("growth.target.tip")}>{t("growth.target")}
-            <input type="text" inputMode="numeric" className="mc-target" value={targetText} placeholder="100000" disabled={!active}
-              onChange={(event) => setTargetText(event.target.value.replace(/[^\d]/g, "").slice(0, 7))}
-              onBlur={() => { const value = Number(targetText); if (targetText && value >= 1000) sendGrowth({ targetPopulation: value }); }}
-              onKeyDown={(event) => { if (event.key === "Enter") (event.target as HTMLInputElement).blur(); }} /></label>
-        </div>
-        {mode === "api" && !language?.hasKey ? <p className="mc-hint">{t("box.no_api")} · <button type="button" className="link" onClick={() => setPage("settings")}>{t("box.go_settings")}</button></p> : null}
-        {parsed && text.trim() && !assist ? (
-          <p className={`mc-hint ${parsed.understood ? "pos" : ""}`}>{parsed.understood ? `${t("box.understood")}：${parsed.summary}` : t("box.not_understood")}
-            {!parsed.understood && mode === "assisted" ? <> · <button type="button" className="link" onClick={() => void startAssist()}>{t("box.copy_prompt")}</button></> : null}
-            {parsed.understood && parsed.confident === false ? <> · {t(mode === "api" && language?.hasKey ? "box.partial_api" : "box.partial")}{mode === "assisted" ? <> <button type="button" className="link" onClick={() => void startAssist()}>{t("box.copy_prompt")}</button></> : null}</> : null}</p>
-        ) : null}
-        {assist ? (
-          <div className="mc-assist">
-            <p>{t("assist.step1")}</p>
-            <div className="mc-links">{FREE_AI_PAGES.map((site) => <button key={site.name} type="button" className="small" onClick={() => void api().aiMayorConsole.open(site.url)}>{site.name}</button>)}</div>
-            <p>{t("assist.step2")}</p>
-            <input value={reply} placeholder={t("assist.reply_placeholder")} onChange={(event) => setReply(event.target.value)} aria-label={t("assist.step2")} />
-            {language?.clipboardWatch && !replyCheck?.ok ? <p className="mc-hint">{t("assist.watching")}</p> : null}
-            {replyCheck ? <p className={`mc-hint ${replyCheck.ok ? "pos" : "neg"}`}>{replyCheck.ok ? `${t("assist.valid")}${lang === "zh" ? "：" : ": "}${(replyCheck as { summary?: { zh: string; en: string } }).summary?.[lang] ?? replyCheck.intent?.type ?? t("assist.limits_only")}` : (DICTIONARIES[lang][`assist.err.${replyCheck.error}` as ConsoleKey] ?? replyCheck.detail)}</p> : null}
-            <div className="mc-actions"><button type="button" className="ghost" onClick={() => setAssist(null)}>{t("assist.cancel")}</button>
-              <button type="button" className="primary" disabled={busy || !replyCheck?.ok || !active} onClick={() => void confirmAssist()}>{t("assist.confirm")}</button></div>
-          </div>
-        ) : null}
-        {result ? <p className={`mc-hint ${result.ok ? "pos" : "neg"}`}>{result.ok ? t(result.detail === "limits recorded" ? "result.limits" : "result.sent") : `${t("result.failed")}${result.detail}`}</p> : null}
-        {result?.notes.length ? <ul className="mc-notes mc-result-notes">{result.notes.map((note, index) => <li key={index}>{note}</li>)}</ul> : null}
-        {limitChips.length > 0 ? (
-          <div className="mc-limits">
-            <small>{t("limits.title")}</small>
-            {limitChips.map((chip) => <span key={chip} className="mc-chip">{chip}</span>)}
-            <button type="button" className="link" disabled={busy || !active} onClick={() => void run(() => api().aiMayorConsole.clearLimits())}>{t("limits.clear")}</button>
-          </div>
-        ) : null}
-      </section>
       {active || cycle ? (
         <section className="mc-details">
           <button type="button" className="ghost small" onClick={() => setDetails(!details)}>{details ? t("details.hide") : t("details.show")}</button>
@@ -315,15 +347,12 @@ export default function ConsoleApp() {
     </div>
   );
 
+  // Settings: the AI key (with what the product can and cannot do with it), and the interface.
   const settings = (
     <div className="mc-page">
       <h1>{t("settings.title")}</h1>
-      <section className="mc-card"><h2>{t("settings.scope")}</h2>{scopeRows(permissions, setPermissions)}
-        <div className="mc-actions"><button type="button" disabled={busy} onClick={() => void run(() => api().aiMayorConsole.setPermissions(permissions)).then(flashSaved)}>{saved ? t("settings.saved") : t("settings.scope.save")}</button></div></section>
       <section className="mc-card"><h2>{t("settings.ai")}</h2>
-        <label className="mc-row-setting"><span><strong>{t("settings.ai.default")}</strong></span>
-          <select value={mode} onChange={(event) => { const value = event.target.value as Mode; setMode(value); void api().aiMayorConsole.languageSet({ mode: value }); }}>
-            <option value="assisted">{t("box.mode.assisted")}</option><option value="api">{t("box.mode.api")}</option></select></label>
+        <p className="mc-notice amber mc-capability">{t("settings.ai.capability")}</p>
         <label className="mc-field"><span>{t("settings.ai.key")}</span><input type="password" value={apiForm.apiKey} placeholder={language?.hasKey ? t("settings.ai.key.set") : "sk-…"}
           onChange={(event) => { const apiKey = event.target.value; const detected = detectPreset(apiKey, apiForm.baseUrl); setApiForm({ ...apiForm, apiKey, ...(apiForm.preset === "auto" && detected ? { preset: detected } : {}) }); }} /></label>
         <label className="mc-field"><span>{t("settings.ai.service")}</span>
@@ -341,21 +370,14 @@ export default function ConsoleApp() {
         {language?.hasKey ? <p className="mc-hint">{balanceText ?? (balance ? t("settings.ai.no_balance") : "")}</p> : null}
         <div className="mc-actions">
           <button type="button" disabled={busy || !language?.hasKey} onClick={() => { setBusy(true); setAiTest(null); void api().aiMayorConsole.aiTest().then((outcome: { ok: boolean; detail: string }) => { setAiTest(outcome); void api().aiMayorConsole.balance().then(setBalance); }).finally(() => setBusy(false)); }}>{t("settings.ai.test")}</button>
-          <button type="button" onClick={() => void api().aiMayorConsole.languageSet({ preset: apiForm.preset, baseUrl: apiForm.baseUrl, model: apiForm.model, ...(apiForm.apiKey ? { apiKey: apiForm.apiKey } : {}) })
+          <button type="button" onClick={() => void api().aiMayorConsole.languageSet({ mode: "api", preset: apiForm.preset, baseUrl: apiForm.baseUrl, model: apiForm.model, ...(apiForm.apiKey ? { apiKey: apiForm.apiKey } : {}) })
           .then((outcome: { hasKey: boolean }) => { setLanguage((previous) => previous ? { ...previous, hasKey: outcome.hasKey, preset: apiForm.preset } : previous); setApiForm({ ...apiForm, apiKey: "" }); setAiTest(outcome.hasKey ? null : { ok: false, detail: t("settings.ai.need_provider") }); flashSaved(); if (outcome.hasKey) void api().aiMayorConsole.balance().then(setBalance); })}>{saved ? t("settings.saved") : t("settings.ai.save")}</button></div>
-        <label className="mc-row-setting"><span><strong>{t("settings.clipboard")}</strong><small>{t("settings.clipboard.desc")}</small></span>
-          <input type="checkbox" className="mc-switch" checked={language?.clipboardWatch ?? false} onChange={(event) => { const clipboardWatch = event.target.checked; setLanguage((previous) => previous ? { ...previous, clipboardWatch } : previous); void api().aiMayorConsole.languageSet({ clipboardWatch }); }} /></label>
       </section>
       <section className="mc-card"><h2>{t("settings.ui")}</h2>
         <label className="mc-row-setting"><span><strong>{t("settings.subtitle")}</strong><small>{gameFullscreen ? t("notice.fullscreen") : t("settings.subtitle.desc")}</small></span>
           <input type="checkbox" className="mc-switch" checked={subtitleOn} onChange={(event) => { setSubtitleOn(event.target.checked); void api().aiMayorConsole.subtitle?.(event.target.checked); }} /></label>
-        <label className="mc-row-setting"><span><strong>{t("settings.commentary")}</strong><small>{t("settings.commentary.desc")}</small></span>
-          <input type="checkbox" className="mc-switch" checked={commentaryOn} onChange={(event) => setCommentaryOn(event.target.checked)} /></label>
         <label className="mc-row-setting"><span><strong>{t("settings.language")}</strong></span><select value={lang} onChange={(event) => setLang(event.target.value as ConsoleLang)}><option value="zh">简体中文</option><option value="en">English</option></select></label>
         <label className="mc-row-setting"><span><strong>{t("settings.theme")}</strong></span><select value={theme} onChange={(event) => setTheme(event.target.value as "dark" | "light")}><option value="dark">{t("settings.dark")}</option><option value="light">{t("settings.light")}</option></select></label>
-        <div className="mc-row-setting"><span><strong>{t("settings.mod")}</strong><small>{state?.mod?.status ?? "—"}</small></span>
-          <button type="button" onClick={() => void api().aiMayorConsole.installMod().then((mod: FullState["mod"]) => setState((previous) => previous ? { ...previous, mod } : previous))}>{t("settings.mod.reinstall")}</button></div>
-        {active ? <div className="mc-row-setting"><span><strong>{t("settings.danger")}</strong></span><button type="button" className="danger" onClick={() => void run(() => api().aiMayorConsole.stop())}>{t("action.stop")}</button></div> : null}
       </section>
     </div>
   );
@@ -366,17 +388,17 @@ export default function ConsoleApp() {
     <div className="mc-page">
       <div className="mc-about-head"><BrandMark /><div><h1>{BRAND.name[lang]}</h1><p className="mc-muted">{t("about.version")} {state?.appVersion ?? "—"}</p>
         <p className="mc-update-line"><button type="button" className="small" disabled={updateBusy !== null} onClick={() => checkUpdate(true)}>{updateBusy === "checking" ? t("update.checking") : t("update.check")}</button>
-          {updateMessage === "latest" ? <span className="mc-hint pos"> {t("update.latest")}</span> : updateMessage === "failed" ? <span className="mc-hint neg"> {t("update.failed")}</span> : null}
+          {updateMessage === "latest" ? <span className="mc-hint pos"> {t("update.latest")}</span> : updateMessage.startsWith("failed") ? <span className="mc-hint neg"> {t("update.failed")}{updateMessage.length > 7 ? ` (${updateMessage.slice(7).slice(0, 80)})` : ""}</span> : null}
           {update?.kind === "AVAILABLE" ? <span className="mc-hint"> {t("update.available")} {update.manifest?.version}</span> : null}</p></div></div>
-      <section className="mc-card"><p className="mc-about-basis">{t("about.basis")}</p></section>
+      <section className="mc-card"><p className="mc-about-basis">{t("about.basis")}</p><p className="mc-muted mc-legal">{t("about.legal")}</p></section>
       <section className="mc-card"><h2>{t("about.feedback")}</h2>
         <div className="mc-actions left"><button type="button" onClick={() => void api().aiMayorConsole.copyDiagnostics().then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 2000); })}>{copied ? t("about.copied") : t("about.copy_diag")}</button>
           {linkButton(BRAND.feedbackUrl, "about.feedback")}</div></section>
       <section className="mc-card"><h2>{t("about.stage")}</h2><p className="mc-muted">{t("about.stage.desc")}</p></section>
       <section className="mc-card"><h2>{t("about.support")}</h2><p className="mc-muted">{t("about.support.desc")}</p>
-        <div className="mc-actions left">{linkButton(BRAND.supportUrl, "about.donate")}{linkButton(BRAND.websiteUrl, "about.website")}</div></section>
+        <div className="mc-actions left">{linkButton(BRAND.supportUrl, "about.donate")}</div></section>
       {BRAND.githubUrl ? <section className="mc-card"><h2>{t("about.github")}</h2><p className="mc-muted">{t("about.github.desc")}</p><p className="mc-muted">{t("about.github.network")}</p>
-        <div className="mc-actions left">{linkButton(BRAND.githubUrl, "about.github.open")}</div></section> : null}
+        <div className="mc-actions left">{linkButton(BRAND.githubUrl, "about.github.open")}{linkButton(BRAND.websiteUrl, "about.website")}</div></section> : null}
     </div>
   );
 
@@ -393,16 +415,7 @@ export default function ConsoleApp() {
         <div className="mc-dragbar" />
         {page === "home" ? home : page === "settings" ? settings : about}
       </main>
-      {takeoverOpen ? (
-        <div className="mc-backdrop" role="presentation" onKeyDown={(event) => { if (event.key === "Escape") setTakeoverOpen(false); }}>
-          <div className="mc-dialog" role="dialog" aria-modal="true" aria-labelledby="mc-take-title">
-            <h2 id="mc-take-title">{t("take.title")}</h2><p className="mc-muted">{t("take.intro")}</p>
-            {scopeRows(permissions, setPermissions)}
-            <div className="mc-actions"><button type="button" className="ghost" onClick={() => setTakeoverOpen(false)}>{t("take.cancel")}</button>
-              <button type="button" className="primary" disabled={busy} onClick={() => { setTakeoverOpen(false); void run(() => api().aiMayorConsole.takeOver(permissions)); }}>{t("take.confirm")}</button></div>
-          </div>
-        </div>
-      ) : null}
+
 
     </div>
   );

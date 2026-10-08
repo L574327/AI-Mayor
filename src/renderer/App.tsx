@@ -15,11 +15,13 @@ import { ContextMenuProvider } from "./components/ContextMenuProvider";
 import OverlayApp from "./apps/ai-mayor-overlay/OverlayApp";
 import ConsoleApp from "./apps/ai-mayor-console/ConsoleApp";
 import SubtitleApp from "./apps/ai-mayor-subtitle/SubtitleApp";
+import GameBarApp from "./apps/ai-mayor-gamebar/GameBarApp";
 
 const isAiMayorOverlay = new URLSearchParams(window.location.search).has("ai-mayor-overlay");
 const isAiMayorSubtitle = new URLSearchParams(window.location.search).has("ai-mayor-subtitle");
+const isAiMayorGameBar = new URLSearchParams(window.location.search).has("ai-mayor-gamebar");
 // The product: the main window is the AI Mayor console (the chat client underneath stays for development).
-const isAiMayorConsole = !isAiMayorOverlay && !isAiMayorSubtitle && window.envVars.AI_MAYOR_PRODUCT_MODE === "1";
+const isAiMayorConsole = !isAiMayorOverlay && !isAiMayorSubtitle && !isAiMayorGameBar && window.envVars.AI_MAYOR_PRODUCT_MODE === "1";
 
 if (window.envVars.NODE_ENV === "development") {
   Debug.enable("app:*");
@@ -45,7 +47,7 @@ export default function App() {
   const { createFile } = useKnowledgeStore();
 
   useEffect(() => {
-    if (isAiMayorOverlay || isAiMayorConsole) return;
+    if (isAiMayorOverlay || isAiMayorConsole || isAiMayorSubtitle || isAiMayorGameBar) return;
     loadAuthData();
     Mousetrap.prototype.stopCallback = () => {
       return false;
@@ -97,6 +99,7 @@ export default function App() {
   }, [loadAuthData, onAuthStateChange]);
 
   if (isAiMayorSubtitle) return <SubtitleApp />;
+  if (isAiMayorGameBar) return <GameBarApp />;
   if (isAiMayorOverlay) return <OverlayApp />;
   if (isAiMayorConsole) return <ConsoleApp />;
 
