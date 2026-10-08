@@ -3,6 +3,7 @@ import {
   compileDistrict,
   DistrictBuilder,
   districtLatticeOrigin,
+  INDUSTRIAL_BUFFER_STEPS_METERS,
   nextConnectedCourse,
   nextTileCandidates,
   safeBrushRadius,
@@ -99,6 +100,22 @@ describe("district builder: the player-style decision layer", () => {
       const dz = Math.max(site.anchor.z - house.z, 0, house.z - (site.anchor.z + site.heightMeters));
       expect(Math.hypot(dx, dz)).toBeGreaterThanOrEqual(400);
     }
+  });
+
+  test("industry searched at a narrower distance finds the sites the 400 m rule left none of (the jobs-short city that stood still)", () => {
+    const house = { x: 500, z: 300 };
+    const wide = surveyDistrictSites({ world: servedWorld(), buildings: [], role: "industrial", landUse: { sensitive: [house], polluters: [] } });
+    const narrow = surveyDistrictSites({ world: servedWorld(), buildings: [], role: "industrial", landUse: { sensitive: [house], polluters: [] }, industrialBufferMeters: 180 });
+    expect(INDUSTRIAL_BUFFER_STEPS_METERS).toEqual([400, 260, 180]);
+    expect(narrow.length).toBeGreaterThanOrEqual(wide.length);
+    for (const site of narrow) {
+      const dx = Math.max(site.anchor.x - house.x, 0, house.x - (site.anchor.x + site.widthMeters));
+      const dz = Math.max(site.anchor.z - house.z, 0, house.z - (site.anchor.z + site.heightMeters));
+      expect(Math.hypot(dx, dz)).toBeGreaterThanOrEqual(180);
+    }
+    // Homes cover the whole owned ground: nothing is 400 m from them, but something is 180 m from a single house.
+    const all = Array.from({ length: 12 }, (_, i) => Array.from({ length: 9 }, (_, j) => ({ x: i * 100, z: j * 100 }))).flat();
+    expect(surveyDistrictSites({ world: servedWorld(), buildings: [], role: "industrial", landUse: { sensitive: all, polluters: [] } })).toHaveLength(0);
   });
 
   test("buildings are classified by what they do to their neighbours", () => {

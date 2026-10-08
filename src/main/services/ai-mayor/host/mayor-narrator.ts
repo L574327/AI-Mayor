@@ -111,14 +111,74 @@ export function narrateNote(note: string, lang: NarratorLang): Line | null {
       : say(`人口 ${Number(m[1]).toLocaleString("zh-CN")}，快到目标 ${Number(m[2]).toLocaleString("zh-CN")} 了：新区缩小到 ${Number(m[3]).toLocaleString("zh-CN")} 平方米，只够再住 ${Number(m[4]).toLocaleString("zh-CN")} 人，避免冲过头`,
         `Population ${Number(m[1]).toLocaleString("en-US")} is near the target ${Number(m[2]).toLocaleString("en-US")}: the next district is cut to ${Number(m[3]).toLocaleString("en-US")} m2, room for the ${Number(m[4]).toLocaleString("en-US")} people still to come, so it does not overshoot`) };  if ((m = /^train: a (\S+) stands/.exec(note)))
     return { key: "train", tone: "done", text: say(`铁路：${m[1]} 已建成`, `Rail: ${m[1]} stands`) };
+  // The growth policy's reading of what the city lacks, with the numbers it was read from.
+  if ((m = /^pipeline: bottleneck (JOBS|HOUSING|MATCH) \(unemployment (\d+)% \((\d+) people\), (\d+) of (\d+) jobs open/.exec(note))) {
+    const [, kind, rate, people, free, total] = m;
+    if (kind === "JOBS") return { key: "gap-jobs", tone: "info", text: say(`缺的是岗位：${people} 人找不到工作（失业率 ${rate}%），${total} 个岗位只剩 ${free} 个空位。所以先找地方放工业，住宅暂时不再加`,
+      `Jobs are the gap: ${people} people are out of work (${rate}%), only ${free} of ${total} jobs are open. Industry first; no more homes for now`) };
+    if (kind === "HOUSING") return { key: "gap-housing", tone: "info", text: say(`缺的是住房：失业率只有 ${rate}%，${total} 个岗位里有 ${free} 个空着等人搬来，下一片开住宅`,
+      `Homes are the gap: unemployment is only ${rate}% and ${free} of ${total} jobs wait for residents; the next district is housing`) };
+    return { key: "gap-match", tone: "info", text: say(`岗位和人对不上：有 ${free} 个空岗，但 ${people} 人仍然失业（学历或距离不合），再多建同类也没用`,
+      `Jobs and people do not fit: ${free} jobs stand open yet ${people} are out of work (skills or distance); more of the same would not help`) };
+  }
+  if ((m = /^role (\w+) has no site; held out/.exec(note)))
+    return { key: `nosite:${m[1]}`, tone: "blocked", text: say(`${({ industrial: "工业", commercial: "商业", residential: "住宅" } as Record<string, string>)[m[1]!] ?? m[1]}区在已有的地块里找不到合规位置，几个游戏小时内先做别的`,
+      `No legal site for a ${m[1]} district on the owned land; doing something else for a few game hours`) };
+  if ((m = /^industry: no site (\d+) m from every home; the next search keeps (\d+) m/.exec(note)))
+    return { key: `industry-relax:${m[2]}`, tone: "info", text: say(`工业区离住宅 ${m[1]} 米找不到位置，下次放宽到 ${m[2]} 米再找`, `No industrial site ${m[1]} m from every home; the next search accepts ${m[2]} m`) };
+  if ((m = /^unfilled stock: (\d+) zoned homes stand empty/.exec(note)))
+    return { key: "unfilled", tone: "info", text: say(`已经划好的住宅还空着 ${m[1]} 格，等居民搬进去再开新的住宅区；别的用途照常建`, `${m[1]} zoned home cells still stand empty; no new housing until they fill, other uses go on`) };
+  if ((m = /^expansion held: the treasury \((-?\d+)\) covers fewer/.exec(note)))
+    return { key: "treasury-cover", tone: "blocked", text: say(`国库 ${Number(m[1]).toLocaleString("zh-CN")}，撑不起再往外建的维护费，先攒钱`, `Treasury ${Number(m[1]).toLocaleString("en-US")} cannot carry more outward building; saving first`) };
   return null;
+}
+
+/** What the city looks like right now, read by the engine (null: not read). */
+export interface Situation {
+  population: number | null; targetPopulation: number | null; previousPopulation: number | null;
+  treasury: number | null; monthlyBalance: number | null;
+  unemploymentPct: number | null; jobsFree: number | null; jobsTotal: number | null;
+  demand: { residential: number | null; commercial: number | null; industrial: number | null } | null;
+}
+
+/**
+ * Lines made from the numbers of the moment (population against the target, the labour market, the game's demand bars, the books), for the stretches
+ * when no cycle has anything new to say. Each carries the figures it reads, so a line is different whenever the city is; the engine never says one twice.
+ */
+export function narrateSituation(s: Situation, lang: NarratorLang): Line[] {
+  const say = (zh: string, en: string) => (lang === "zh" ? zh : en);
+  const n = (value: number) => Math.round(value).toLocaleString(lang === "zh" ? "zh-CN" : "en-US");
+  const out: Line[] = [];
+  if (s.population !== null && s.targetPopulation !== null && s.targetPopulation > s.population) {
+    const delta = s.previousPopulation === null ? null : s.population - s.previousPopulation;
+    const share = Math.min(100, Math.floor((s.population / s.targetPopulation) * 100));
+    out.push({ key: "sit-progress", tone: "info", text: say(
+      `人口 ${n(s.population)}${delta === null ? "" : delta === 0 ? "，和上次一样" : `，比上次${delta > 0 ? "多" : "少"}了 ${n(Math.abs(delta))}`}；离目标 ${n(s.targetPopulation)} 还差 ${n(s.targetPopulation - s.population)}（${share}%）`,
+      `Population ${n(s.population)}${delta === null ? "" : delta === 0 ? ", unchanged" : `, ${delta > 0 ? "up" : "down"} ${n(Math.abs(delta))} since last look`}; ${n(s.targetPopulation - s.population)} short of the ${n(s.targetPopulation)} target (${share}%)`) });
+  }
+  if (s.unemploymentPct !== null && s.jobsFree !== null && s.jobsTotal !== null && s.population !== null) {
+    const bar = (value: number | null, zh: string, en: string) => value === null ? null : say(`${zh}需求条${value >= 100 ? "已拉满" : `只有 ${n(value)}`}`, `${en} demand ${value >= 100 ? "is full" : `is only ${n(value)}`}`);
+    const bars = [bar(s.demand?.industrial ?? null, "工业", "industrial"), bar(s.demand?.commercial ?? null, "商业", "commercial")].filter((x): x is string => x !== null);
+    out.push({ key: "sit-labour", tone: "info", text: say(
+      `劳动力：失业率 ${Math.round(s.unemploymentPct)}%，${n(s.jobsTotal)} 个岗位里空着 ${n(s.jobsFree)} 个${bars.length > 0 ? `；游戏的${bars.join("，")}` : ""}`,
+      `Labour: unemployment ${Math.round(s.unemploymentPct)}%, ${n(s.jobsFree)} of ${n(s.jobsTotal)} jobs open${bars.length > 0 ? `; the game's ${bars.join(", ")}` : ""}`) });
+  }
+  if (s.treasury !== null && s.monthlyBalance !== null) {
+    const months = s.monthlyBalance < 0 ? Math.floor(s.treasury / -s.monthlyBalance) : null;
+    out.push({ key: "sit-books", tone: s.monthlyBalance < 0 ? "warn" : "info", text: say(
+      `账上 ${n(s.treasury)}，每月${s.monthlyBalance < 0 ? `亏 ${n(-s.monthlyBalance)}${months !== null ? `，照这个速度约撑 ${months} 个月` : ""}` : `赚 ${n(s.monthlyBalance)}`}`,
+      `Treasury ${n(s.treasury)}, ${s.monthlyBalance < 0 ? `losing ${n(-s.monthlyBalance)} a month${months !== null ? `, about ${months} month(s) of runway` : ""}` : `earning ${n(s.monthlyBalance)} a month`}`) });
+  }
+  return out;
 }
 
 /** The waiting reason of a cycle that built nothing outward. */
 export function narrateWait(waitReason: string | null | undefined, lang: NarratorLang): Line | null {
   if (!waitReason) return null;
-  const text = (lang === "zh" ? WAIT_ZH : WAIT_EN)[waitReason] ?? (/^NO_USABLE_(\w+)_SUPPLY$/.test(waitReason)
-    ? (lang === "zh" ? "城市缺的东西（岗位或住房）现在没有可建的地块，先处理城市问题" : "What the city lacks has no buildable site right now; tending the city meanwhile") : null);
+  const supply = /^NO_USABLE_(\w+)_SUPPLY$/.exec(waitReason);
+  const lack = supply ? ({ JOBS: ["岗位", "jobs"], HOUSING: ["住房", "homes"], MATCH: ["岗位与人的匹配", "a job-skill fit"] } as Record<string, [string, string]>)[supply[1]!] : undefined;
+  const text = (lang === "zh" ? WAIT_ZH : WAIT_EN)[waitReason] ?? (supply
+    ? (lang === "zh" ? `城市缺${lack ? lack[0] : "的东西"}，但眼下没有能建它的合规地块，先把已有的问题处理掉` : `The city lacks ${lack ? lack[1] : "something"} but no legal site can build it right now; tending existing problems`) : null);
   return text ? { key: `wait:${waitReason}`, tone: "info", text } : null;
 }
 
@@ -162,7 +222,13 @@ export function narrateFinance(status: string, lang: NarratorLang): Line | null 
 /** The lines worth saying for one cycle: what was done first, then what is blocked, then why it waits. At most `limit`. */
 export function narrateCycle(input: { notes: readonly string[]; waitReason?: string | null; status?: string | null }, lang: NarratorLang, limit = 3): Line[] {
   const lines = input.notes.map((note) => narrateNote(note, lang)).filter((line): line is Line => line !== null);
-  if (input.status === "BUILT") lines.unshift({ key: "district", tone: "done", text: lang === "zh" ? "扩张：开辟了一片新的城区（路网+分区）" : "Expansion: a new district laid (streets and zoning)" });
+  if (input.status === "BUILT") {
+    const area = /batch (\d+) m2/.exec(input.notes.find((note) => note.startsWith("V2 ")) ?? "");
+    const hectares = area ? Math.round(Number(area[1]) / 10_000) : null;
+    lines.unshift({ key: `district:${hectares ?? ""}`, tone: "done", text: lang === "zh"
+      ? `扩张：新开了一片区${hectares ? `，约 ${hectares.toLocaleString("zh-CN")} 公顷` : ""}，路网和分区都已铺好`
+      : `Expansion: a new district${hectares ? ` of about ${hectares.toLocaleString("en-US")} ha` : ""}, streets and zoning laid` });
+  }
   const order: Tone[] = ["done", "warn", "blocked", "info"];
   const sorted = lines.sort((a, b) => order.indexOf(a.tone) - order.indexOf(b.tone));
   const unique = sorted.filter((line, index) => sorted.findIndex((other) => other.key === line.key) === index);

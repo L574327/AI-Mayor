@@ -32,7 +32,9 @@ export const UNEMPLOYMENT_PROBLEM_SHARE = 0.12;
  */
 export const JOB_VACANCY_TARGET_SHARE = 0.03;
 /** A land use whose zoned cells stand this empty is stock, not a shortage: no more of it until it fills. */
-export const STOCK_PAUSE_UNREALIZED_SHARE = 0.35;
+export const STOCK_PAUSE_UNREALIZED_SHARE = 0.7;
+/** With no named gap, empty zoning below this many cells (a district and a half of one use) holds nothing back. */
+export const UNREAD_BOTTLENECK_STOCK_FLOOR_CELLS = 1500;
 
 export function unemploymentShare(rate: number): number {
   if (!Number.isFinite(rate) || rate <= 0) return 0;
@@ -178,7 +180,14 @@ export function neededStockAbsorbing(history: ReadonlyArray<ZoningMixSignals["ce
 export function pausedLandUses(signals: ZoningMixSignals, bottleneck: GrowthBottleneck, available: readonly ZoneCategory[]): ZoneCategory[] {
   const paused = new Set<ZoneCategory>();
   if (bottleneck === "JOBS" || bottleneck === "MATCH") paused.add("residential");
+  // The uses that answer the bottleneck are never held back by their own empty zoning: a district laid a minute ago is all empty (the buildings grow over
+  // game hours), and holding the very use the city lacks on that account left the Mayor idle after every district (live 2026-10-07: "paused: residential/
+  // commercial/industrial" with 645 jobs open and nobody out of work).
+  const answers: ZoneCategory[] = bottleneck === "HOUSING" ? ["residential"] : bottleneck === "JOBS" ? ["industrial", "commercial"] : [];
   for (const category of available) {
+    if (answers.includes(category)) continue;
+    // Nothing named as the gap (a young city whose labour market is too small to read): a use is held only when its empty stock is a couple of districts' worth.
+    if (bottleneck === "NONE" && signals.cells[category].empty < UNREAD_BOTTLENECK_STOCK_FLOOR_CELLS) continue;
     if (signals.cells[category].zoned > 0 && unrealizedShare(signals, category) >= STOCK_PAUSE_UNREALIZED_SHARE) paused.add(category);
   }
   return [...paused].filter((category) => available.includes(category));

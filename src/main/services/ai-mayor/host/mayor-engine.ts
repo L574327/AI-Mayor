@@ -20,7 +20,8 @@ import { parseObjectiveProfile } from "../v2/objective-profile";
 import type { AcceptedRevision } from "../semantic-compiler/types";
 import { type ProtectedArea, protection } from "../v2/protection";
 import { type Funds, poorAtTakeover, SpendGuard, SpendGuardRefusal, spendGuardConfigFrom, spends } from "../v2/spend-guard";
-import { type Line as NarratedLine, narrateCycle, narrateFinance, type NarratorLang } from "./mayor-narrator";
+import { AUTONOMY_STABILIZATION_POPULATION } from "../growth-mode";
+import { type Line as NarratedLine, narrateCycle, narrateFinance, narrateSituation, type NarratorLang, type Situation } from "./mayor-narrator";
 import { type CityDistrict, FORBID_KINDS, type ForbidKind, type Instruction, type Lowered, lowerInstruction, mergeProtectedAreas } from "./intent-lowering";
 import { type CitySnapshot, type EngineMessage, ENGINE_ENV, type HostMessage, readPermissions } from "./protocol";
 
@@ -37,6 +38,8 @@ const permissions = readPermissions(process.env[ENGINE_ENV.permissions]);
 const SNAPSHOT_EVERY_MS = 5_000;
 /** How long the Mayor rests after a cycle that decided to wait, before it looks again. */
 const WAIT_CYCLE_REST_MS = 10_000;
+/** A wait the policy decided in no time at all (no site was searched, no world read) is asked again soon: the next district should follow the last one, not wait half a minute. */
+const QUICK_WAIT_REST_MS = 3_000;
 const WAIT_FOR_GAME_EVERY_MS = 3_000;
 
 // The permissions are read where they apply (runtime and district builder), from the environment of this process.
@@ -54,6 +57,7 @@ let drainCommands: () => Promise<void> = async () => undefined;
 let clearLimits: () => void = () => undefined;
 /** The last cycle's outcome (BUILD / WAIT / ...), from the decision row, and how many player instructions were handled. */
 let lastOutcome: string | null = null;
+let lastWaitWasQuick = false;
 let commandsHandled = 0;
 
 process.on("message", (raw: unknown) => {
@@ -225,26 +229,46 @@ async function main(): Promise<void> {
   process.env.AI_MAYOR_EXPERIENCE_BOOK ??= path.join(dataDir, "experience-book.json");
   // The subtitle: facts of each cycle as sentences (`mayor-narrator.ts`), in the language the player last spoke; a line is not repeated within 10 minutes.
   let narrationLang: NarratorLang = process.env.AI_MAYOR_LANG === "en" ? "en" : "zh";
+  // The same sentence is not said again within 45 minutes, and one kind of line (its key) not more than once in 3: a player who watches the subtitle
+  // must not read the same words over, and a line with new figures in it is a new sentence.
   const saidAt = new Map<string, number>();
+  const saidKeyAt = new Map<string, number>();
   let lastSpokeAt = 0;
-  let surveyLines = 0;
-  const speak = (lines: readonly NarratedLine[]) => {
+  const SAME_TEXT_MS = 45 * 60_000;
+  const SAME_KEY_MS = 5 * 60_000;
+  /** However many things happen, at most one line a minute: a subtitle that keeps pace with every note is noise. A player instruction is answered at once. */
+  const MIN_GAP_MS = 60_000;
+  const speak = (lines: readonly NarratedLine[], urgent = false) => {
     const now = Date.now();
     for (const line of lines) {
-      const said = saidAt.get(`${line.key}|${line.text}`);
-      if (said !== undefined && now - said < 10 * 60_000) continue;
-      saidAt.set(`${line.key}|${line.text}`, now);
+      if (!urgent && now - lastSpokeAt < MIN_GAP_MS) break;
+      const text = saidAt.get(line.text);
+      const kind = saidKeyAt.get(line.key);
+      if (text !== undefined && now - text < SAME_TEXT_MS) continue;
+      if (kind !== undefined && now - kind < SAME_KEY_MS) continue;
+      saidAt.set(line.text, now);
+      saidKeyAt.set(line.key, now);
       lastSpokeAt = now;
       send({ k: "commentary", text: line.text, tone: line.tone });
     }
-    if (saidAt.size > 500) for (const [key, at] of saidAt) if (now - at > 10 * 60_000) saidAt.delete(key);
+    if (saidAt.size > 500) for (const [key, at] of saidAt) if (now - at > SAME_TEXT_MS) saidAt.delete(key);
+  };
+  // Every decision, waits included, is kept in the data folder (the console shows only the latest): the reason a city stood still must be readable afterwards.
+  const decisionsFile = path.join(dataDir, "decisions.jsonl");
+  const keepDecision = (row: string) => {
+    try {
+      if (fs.existsSync(decisionsFile) && fs.statSync(decisionsFile).size > 5_000_000) fs.renameSync(decisionsFile, `${decisionsFile}.old`);
+      fs.appendFileSync(decisionsFile, `${row}\n`);
+    } catch { /* a log that cannot be written never disturbs a cycle */ }
   };
   setDecisionListener((row) => {
+    keepDecision(row);
     try {
       const parsed = obj(JSON.parse(row));
       speak(narrateCycle({ notes: Array.isArray(parsed.notes) ? (parsed.notes as unknown[]).map(String) : [],
         waitReason: typeof parsed.waitReason === "string" ? parsed.waitReason : null, status: typeof parsed.status === "string" ? parsed.status : null }, narrationLang));
       if (typeof parsed.outcome === "string") lastOutcome = parsed.outcome;
+      lastWaitWasQuick = parsed.outcome === "WAIT" && (num(parsed.elapsedMs) ?? Infinity) < 2_000 && /^(NO_USABLE_|HOUSING_HELD)/.test(String(parsed.waitReason ?? ""));
       send({ k: "decision", data: { at: new Date().toISOString(), status: typeof parsed.status === "string" ? parsed.status : null,
         outcome: typeof parsed.outcome === "string" ? parsed.outcome : null, waitReason: typeof parsed.waitReason === "string" ? parsed.waitReason : null,
         elapsedMs: num(parsed.elapsedMs), notes: Array.isArray(parsed.notes) ? (parsed.notes as unknown[]).map(String).slice(0, 120) : [] } });
@@ -263,17 +287,8 @@ async function main(): Promise<void> {
       send({ k: "status", text, tick: Number(state.tickCount ?? 0) });
       const finance = narrateFinance(text, narrationLang);
       if (finance) speak([finance]);
-      // A survey takes tens of seconds with no event: say what it is doing at the start and again while it goes on, so the subtitle never goes quiet.
-      if (/surveying the next district/i.test(text)) {
-        speak([{ key: "survey", tone: "info", text: narrationLang === "zh" ? "在量下一片地：读路网、找空地、看哪里接得上，这一步要几十秒。" : "Surveying the next stretch: reading the roads, finding free ground, checking what can be joined; this takes tens of seconds." }]);
-        const mark = lastSpokeAt;
-        setTimeout(() => { if (lastSpokeAt !== mark || stopping) return; const more = narrationLang === "zh"
-            ? ["还在读：逐块试这些空地能不能通路、离住宅够不够远。", "游戏对每块地都要先预检一遍，慢但不会白花钱。", "路网和空地对完了就动手，这轮没有符合条件的会直接说为什么。"]
-            : ["Still reading: trying each free spot for road access and distance from homes.", "The game pre-checks every spot first: slow, but nothing is spent for nothing.", "Once roads and free ground are matched I act; if nothing qualifies I will say why."];
-          send({ k: "commentary", text: more[surveyLines++ % more.length]!, tone: "info" }); }, 12_000);
-      }
     },
-    emitMayorCommentary: (line) => send({ k: "commentary", text: String((line as { text?: unknown }).text ?? ""), tone: String((line as { tone?: unknown }).tone ?? "") }) });
+    emitMayorCommentary: (line) => { const text = String((line as { text?: unknown }).text ?? ""); const tone = String((line as { tone?: unknown }).tone ?? "info"); if (text) speak([{ key: `runtime:${text}`, text, tone: (["done", "blocked", "info", "warn"].includes(tone) ? tone : "info") as NarratedLine["tone"] }]); } });
   // The Brain spends nothing on a model provider: balance is not a gate.
   ports.getBalance = async () => ({ isAvailable: true, currency: "CNY", totalBalance: 10_000, grantedBalance: 0, toppedUpBalance: 10_000, fetchedAt: new Date().toISOString() });
   // A stop of this process must not write a save of its own (the rotating checkpoints and the takeover backup are the saves).
@@ -380,7 +395,26 @@ async function main(): Promise<void> {
       iconsTruncated: Array.isArray(icons.notifications) && (icons.notifications as unknown[]).length >= 500,
     };
     send({ k: "snapshot", data });
+    // A quiet stretch (nothing said for two minutes): say how the city stands, from figures read now.
+    if (Date.now() - lastSpokeAt >= 5 * 60_000 && Date.now() - lastSituationAt >= 8 * 60_000) {
+      lastSituationAt = Date.now();
+      try {
+        const labor = await look("cs2_labor");
+        const demand = obj(await look("cs2_demand"));
+        const jobs = obj(labor.jobs);
+        const bar = (domain: string) => num(obj(demand[domain]).buildingDemand);
+        const situation: Situation = { population: data.population, targetPopulation: limits.targetPopulation ?? AUTONOMY_STABILIZATION_POPULATION, previousPopulation: lastSituationPopulation,
+          treasury: data.treasury, monthlyBalance: data.monthlyBalance, unemploymentPct: num(labor.unemploymentRate), jobsFree: num(jobs.free), jobsTotal: num(jobs.total),
+          demand: { residential: bar("residential"), commercial: bar("commercial"), industrial: bar("industrial") } };
+        lastSituationPopulation = data.population;
+        const candidates = narrateSituation(situation, narrationLang);
+        if (candidates.length > 0) speak([candidates[situationRound++ % candidates.length]!]);
+      } catch { /* a figure that cannot be read is not said */ }
+    }
   };
+  let lastSituationAt = 0;
+  let lastSituationPopulation: number | null = null;
+  let situationRound = 0;
 
   // Instructions are answered as they arrive, not after the tick in flight (a tick can run for minutes): the limits apply at once, the goal is
   // pending until the Mayor's next decision. One at a time, in order.
@@ -445,7 +479,7 @@ async function main(): Promise<void> {
       const detail = acted ? (runtime.getState()?.lastStatus ?? "accepted") : lowered.growth || lowered.targetPopulation !== null ? "growth setting recorded" : lowered.accepted ? "limits recorded" : "not accepted";
       send({ k: "command-result", id: command.id, ok: lowered.accepted || acted, detail, notes: lowered.notes });
       if (lowered.accepted || acted) speak([{ key: `command:${command.id}`, tone: "info", text: narrationLang === "zh"
-        ? `收到指令“${command.text.slice(0, 40)}”${lowered.notes[0] ? `：${lowered.notes[0].slice(0, 80)}` : ""}` : `Instruction received: "${command.text.slice(0, 40)}"${lowered.notes[0] ? ` — ${lowered.notes[0].slice(0, 80)}` : ""}` }]);
+        ? `收到指令“${command.text.slice(0, 40)}”${lowered.notes[0] ? `：${lowered.notes[0].slice(0, 80)}` : ""}` : `Instruction received: "${command.text.slice(0, 40)}"${lowered.notes[0] ? ` — ${lowered.notes[0].slice(0, 80)}` : ""}` }], true);
     } catch (error) {
       send({ k: "command-result", id: command.id, ok: false, detail: error instanceof Error ? error.message : String(error) });
     }
@@ -474,7 +508,7 @@ async function main(): Promise<void> {
     // A cycle that decided to wait (nothing to build now, no land to buy) is not repeated at once: measured live 2026-10-06, a city out of land
     // ran a full world read every 7 s for nothing. The pause ends early for a player instruction, a pause or a stop.
     if (lastOutcome === "WAIT") {
-      const until = Date.now() + WAIT_CYCLE_REST_MS;
+      const until = Date.now() + (lastWaitWasQuick ? QUICK_WAIT_REST_MS : WAIT_CYCLE_REST_MS);
       while (Date.now() < until && !stopping && !paused && queuedCommands.length === 0 && commandsHandled === handledBefore) {
         if (Date.now() - lastSnapshotAt >= SNAPSHOT_EVERY_MS) await snapshot();
         send({ k: "cycle" }); // resting on purpose is not a stall

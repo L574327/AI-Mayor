@@ -372,6 +372,12 @@ export function nearestFirst<T>(items: readonly T[], target: SpatialPoint2, at: 
  */
 export const RESIDENTIAL_POLLUTER_BUFFER_METERS = 320;
 export const INDUSTRIAL_RESIDENTIAL_BUFFER_METERS = 400;
+/**
+ * The distances industry keeps from homes, widest first. A city whose districts already cover its owned ground has no site 400 m from every home, and
+ * with the jobs short that left the Mayor waiting for ever (live 2026-10-07: unemployment 48%, the game's industrial demand bar full, no industrial
+ * district laid). Each complete search that finds no site moves one step down; a district laid resets to the widest.
+ */
+export const INDUSTRIAL_BUFFER_STEPS_METERS: readonly number[] = [INDUSTRIAL_RESIDENTIAL_BUFFER_METERS, 260, 180];
 
 export interface DistrictLandUse {
   /** Homes, schools, clinics: what pollution and noise must stay away from. */
@@ -566,6 +572,8 @@ export function surveyDistrictSites(input: {
   /** The district's role and what it must keep away from. Omitted: no isolation is applied. */
   role?: DistrictRole;
   landUse?: DistrictLandUse;
+  /** How far industry keeps from homes this time (default `INDUSTRIAL_RESIDENTIAL_BUFFER_METERS`; see `INDUSTRIAL_BUFFER_STEPS_METERS`). */
+  industrialBufferMeters?: number;
   /** The largest district the treasury should pay for now; bigger shapes are not offered. */
   maximumAreaSquareMeters?: number;
   /** The land's maximal rectangles (see `district-land.ts`). Present: districts are laid on these instead of the shape ladder. */
@@ -616,7 +624,7 @@ export function surveyDistrictSites(input: {
   // The isolation this role keeps (industry from homes, homes from polluters), read once for every placement.
   const keepAway = input.landUse && input.role
     ? input.role === "industrial"
-      ? { points: input.landUse.sensitive, meters: INDUSTRIAL_RESIDENTIAL_BUFFER_METERS }
+      ? { points: input.landUse.sensitive, meters: input.industrialBufferMeters ?? INDUSTRIAL_RESIDENTIAL_BUFFER_METERS }
       : { points: input.landUse.polluters, meters: RESIDENTIAL_POLLUTER_BUFFER_METERS, also: [{ points: input.landUse.loud ?? [], meters: RESIDENTIAL_LOUD_BUFFER_METERS }] }
     : null;
   // A buffer is land the zoning keeps clear, not land a street may not cross. With the gateway capped below the buffer, an industrial district
@@ -1252,6 +1260,9 @@ export class DistrictBuilder {
   #cycleRole: DistrictRole | null = null;
   /** When the city began to stand still for want of land it could not afford (null: it is not). See `LAND_FINANCE_ESCAPE_HOURS`. */
   #landHeldSince: GameStamp | null = null;
+  /** Which step of `INDUSTRIAL_BUFFER_STEPS_METERS` industry is searched at (memory only; a restart starts at the widest). */
+  #industrialStep = 0;
+  #industrialBuffer(): number { return INDUSTRIAL_BUFFER_STEPS_METERS[Math.min(this.#industrialStep, INDUSTRIAL_BUFFER_STEPS_METERS.length - 1)]!; }
   #blockedRoles(): DistrictRole[] {
     const now = this.#stamp(this.#cycles);
     return [...this.#roleNoSiteSince].filter(([, since]) => !stampElapsed(since, now, ROLE_NO_SITE_BLOCK_HOURS, ROLE_NO_SITE_BLOCK_CYCLES)).map(([role]) => role);
@@ -1506,7 +1517,14 @@ export class DistrictBuilder {
       result.feasibility.reason === "NO_SITE_IN_BOUNDED_SEARCH" && result.feasibility.coverage.complete) {
       this.#roleNoSiteSince.set(this.#cycleRole, this.#stamp(this.#cycles));
       result.notes.push(`role ${this.#cycleRole} has no site; held out for ${this.#frame !== null ? `${ROLE_NO_SITE_BLOCK_HOURS} game hours` : `${ROLE_NO_SITE_BLOCK_CYCLES} cycles`}, the next use is tried`);
-    } else if (result.status === "BUILT" && result.role) this.#roleNoSiteSince.delete(result.role);
+      if (this.#cycleRole === "industrial" && this.#industrialStep < INDUSTRIAL_BUFFER_STEPS_METERS.length - 1) {
+        this.#industrialStep += 1;
+        result.notes.push(`industry: no site ${INDUSTRIAL_BUFFER_STEPS_METERS[this.#industrialStep - 1]} m from every home; the next search keeps ${this.#industrialBuffer()} m`);
+      }
+    } else if (result.status === "BUILT" && result.role) {
+      this.#roleNoSiteSince.delete(result.role);
+      if (result.role === "industrial") this.#industrialStep = 0;
+    }
     // A district stood or a tile was bought: the city is not standing still any more.
     if (result.status === "BUILT" || result.status === "LAND_PURCHASED") this.#landHeldSince = null;
     // P2 of the V2 candidate: a large batch goes out in one go. While the batch (the smaller of what the cash pays for and what the city can
@@ -1766,7 +1784,7 @@ export class DistrictBuilder {
     surveyDiagnostics = emptySurveyDiagnostics();
     const surveyed = surveyDistrictSites({ world, buildings: knownBuildings, excludedAnchors: this.#refused,
       limit: pass === 0 ? (intent ? 14 : 6) : (intent ? 40 : 24), role, landUse,
-      diagnostics: surveyDiagnostics, protection,
+      diagnostics: surveyDiagnostics, protection, industrialBufferMeters: this.#industrialBuffer(),
       ...(input.maximumAreaSquareMeters !== undefined ? { maximumAreaSquareMeters: input.maximumAreaSquareMeters } : {}),
       ...(rectangles ? { rectangles } : {}) });
     // 攻略 (user-approved 2026-10-05): once high density is unlocked, new homes are laid around the passenger station, where the train sets the
@@ -3898,7 +3916,7 @@ export class DistrictBuilder {
       this.#ground = ground;
     }
     // Every role but industry may zone homes (a commercial district does), so every role but industry keeps clear of the polluters.
-    const keepAway = role === "industrial" ? { points: landUse.sensitive, meters: INDUSTRIAL_RESIDENTIAL_BUFFER_METERS }
+    const keepAway = role === "industrial" ? { points: landUse.sensitive, meters: this.#industrialBuffer() }
       : { points: landUse.polluters, meters: RESIDENTIAL_POLLUTER_BUFFER_METERS, also: [{ points: landUse.loud ?? [], meters: RESIDENTIAL_LOUD_BUFFER_METERS }] };
     // The Bridge lists at most 500 of a city's buildings (2,988-3,168 in the live saves), so a ground that is free by that list is not proven free.
     // This read of the owned ground names EVERY building in it.

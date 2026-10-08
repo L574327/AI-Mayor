@@ -63,6 +63,15 @@ describe("FAST_EXPANSION: which supply to stop adding", () => {
     expect(neededStockAbsorbing(falling, now(6_400), []).absorbing).toBe(false);
   });
 
+  test("the use the city lacks is never held by its own empty zoning: a district laid a minute ago is all empty and must not stop the next one", () => {
+    const fresh = mix({ residential: { zoned: 1_000, empty: 1_000 }, commercial: { zoned: 400, empty: 400 }, industrial: { zoned: 800, empty: 800 } });
+    expect(pausedLandUses(fresh, "HOUSING", ALL)).not.toContain("residential");
+    expect(pausedLandUses(fresh, "JOBS", ALL)).toEqual(expect.not.arrayContaining(["industrial", "commercial"]));
+    // A young city with no named gap: a district's worth of empty zoning holds nothing; two districts' worth of one use does.
+    expect(pausedLandUses(fresh, "NONE", ALL)).toEqual([]);
+    expect(pausedLandUses(mix({ commercial: { zoned: 2_000, empty: 1_900 } }), "NONE", ALL)).toEqual(["commercial"]);
+  });
+
   test("only land uses the game offers can be paused; homes are held while jobs are short", () => {
     expect(pausedLandUses(mix({}), "JOBS", ["residential", "commercial"])).toEqual(["residential"]);
     expect(pausedLandUses(mix({ office: { zoned: 10, empty: 10 } }), "NONE", ["residential", "commercial"])).toEqual([]);
