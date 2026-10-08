@@ -27,7 +27,7 @@ export const CARE_ISSUES: readonly CareFocus[] = ["TRAFFIC", "NOISE", "RUINS", "
 /** The issues the Mayor answers by a write today. */
 export const ANSWERED_ISSUES: ReadonlySet<CareFocus> = new Set<CareFocus>(["TRAFFIC", "NOISE", "RUINS", "ACCESS", "CRIME", "FIRE", "HEALTH", "DEATHCARE", "GARBAGE", "FINANCE"]);
 
-export const SERVICE_FOCUS: Readonly<Record<ServiceNeed, CareFocus>> = { deathcare: "DEATHCARE", healthcare: "HEALTH", police: "CRIME", fire: "FIRE", roads: "TRAFFIC", garbage: "GARBAGE", education: "EDUCATION" };
+export const SERVICE_FOCUS: Readonly<Record<ServiceNeed, CareFocus>> = { deathcare: "DEATHCARE", healthcare: "HEALTH", police: "CRIME", fire: "FIRE", roads: "TRAFFIC", garbage: "GARBAGE", education: "EDUCATION", transit: "TRAFFIC" };
 
 /** The problems a goal names, or null for a goal that is not about the city's problems (expansion, utilities, ...). */
 export function careFocusFrom(intent: MayorStructuredGoalIntent | null | undefined): CareFocus[] | null {

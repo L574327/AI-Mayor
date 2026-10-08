@@ -3533,6 +3533,15 @@ export function createMainMayorPorts(options: MainMayorAdapterOptions): MayorRun
         } catch { return null; }
       },
       createLine: async (prefab, stops, signal) => districtWrite("cs2_transit_line_create", { prefab, stops }, signal),
+      // Roadside stops (`bus-lines.ts`): Bridge `/transit/stop/*` (built 2026-10-08). An older Bridge answers 404: no stop objects, no bus line.
+      stopPrefabs: async (type, signal) => {
+        try {
+          const body = record(await callTool("cs2_transit_stop_prefabs", { type }, signal));
+          if (!Array.isArray(body.prefabs)) return null;
+          return body.prefabs.map(record).filter((row) => typeof row.name === "string").map((row) => ({ name: String(row.name), locked: row.locked === true }));
+        } catch { return null; }
+      },
+      placeStop: async (prefab, point, signal) => districtWrite("cs2_transit_stop_place", { prefab, x: point.x, z: point.z }, signal),
       runBriefly: async (signal) => { await runSimulation({ hours: 0.1, speed: 1 }, signal ?? new AbortController().signal).catch(() => undefined); },
     },
     // The road network's own tools (`v2/road-care.ts`): reads are plain calls, writes go through the native build mutex like every other write.

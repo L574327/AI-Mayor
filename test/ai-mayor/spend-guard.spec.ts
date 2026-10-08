@@ -20,12 +20,13 @@ describe("the spending fuse", () => {
   test("a call that would leave the treasury under the floor is refused, whatever it is", async () => {
     const { state, read } = purse(744_000);
     const guard = new SpendGuard(744_000, false, read);
-    expect(guard.floor).toBeCloseTo(223_200);
+    // 10% of the takeover funds (it was 30% until 2026-10-08: on a new 1,000,000 city that held 330,000 idle).
+    expect(guard.floor).toBeCloseTo(74_400);
     // Well above the floor: allowed. Near it (inside the margin): refused.
     await expect(guard.run("cs2_build_road", spend(state, 10_000))).resolves.toBe("ok");
-    state.money = 240_000;
+    state.money = 80_000;
     await expect(guard.run("cs2_purchase_tile", spend(state, 100_000))).rejects.toBeInstanceOf(SpendGuardRefusal);
-    expect(state.money).toBe(240_000);
+    expect(state.money).toBe(80_000);
     expect(guard.refusals).toBe(1);
   });
 
@@ -55,10 +56,10 @@ describe("the spending fuse", () => {
   });
 
   test("a healthy city under its floor that is losing money every month may act; one that is earning waits for its income", async () => {
-    const bleeding = purse(100_000, { monthlyBalance: -50_000 });
+    const bleeding = purse(50_000, { monthlyBalance: -50_000 });
     const guardA = new SpendGuard(744_000, false, bleeding.read);
     await expect(guardA.run("cs2_place_building", spend(bleeding.state, 20_000))).resolves.toBe("ok");
-    const earning = purse(100_000, { monthlyBalance: 200_000 });
+    const earning = purse(50_000, { monthlyBalance: 200_000 });
     const guardB = new SpendGuard(744_000, false, earning.read);
     await expect(guardB.run("cs2_place_building", spend(earning.state, 20_000))).rejects.toBeInstanceOf(SpendGuardRefusal);
   });

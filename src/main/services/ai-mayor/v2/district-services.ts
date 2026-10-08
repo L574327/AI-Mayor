@@ -15,8 +15,21 @@
 import type { SpatialPoint2 } from "../spatial/types";
 import { stampElapsed, type GameStamp } from "./game-clock";
 
-export type ServiceNeed = "deathcare" | "healthcare" | "police" | "fire" | "roads" | "garbage" | "education";
-export const SERVICE_NEEDS: readonly ServiceNeed[] = ["deathcare", "healthcare", "police", "fire", "roads", "garbage", "education"];
+export type ServiceNeed = "deathcare" | "healthcare" | "police" | "fire" | "roads" | "garbage" | "education" | "transit";
+export const SERVICE_NEEDS: readonly ServiceNeed[] = ["deathcare", "healthcare", "police", "fire", "roads", "garbage", "education", "transit"];
+
+/**
+ * Buses have no icon either: their evidence is a city big enough for buses (`bus-lines.ts` BUS_MINIMUM_POPULATION) with no bus depot standing. The depot is
+ * what every line's buses start from, and building it is what unlocks the Bus Line tool (the game's "object built" unlock requirement). One notice per
+ * city, at its heart; the care round then places the depot like any other service building.
+ */
+export const BUS_GAP_NOTICE = "Bus Service Gap (no depot)";
+export function withBusGap(reading: IconReading, wanted: boolean, centre: SpatialPoint2 | null): IconReading {
+  if (!wanted || !centre) return reading;
+  // SERVICE_MINIMUM_ICONS notices: one gap is evidence enough (it is not a stray icon).
+  const notices = SERVICE_MINIMUM_ICONS;
+  return { counts: { ...reading.counts, [BUS_GAP_NOTICE]: notices }, items: [...reading.items, ...Array.from({ length: notices }, () => ({ type: BUS_GAP_NOTICE, x: centre.x, z: centre.z }))] };
+}
 
 /**
  * Education has no icon: its evidence is the labour market. Jobs for well- and highly-educated workers that stand open while the people who could fill
@@ -60,6 +73,7 @@ export const SERVICE_EVIDENCE_ICON: Readonly<Record<ServiceNeed, RegExp>> = {
   roads: /^Worn Road/i,
   garbage: /^Garbage Notification/i,
   education: /^Education Gap/i,
+  transit: /^Bus Service Gap/i,
 };
 
 /** A building to unlock through the development tree when no building of the need is unlocked (`tech-tree.ts` unlockPrefabs). */
@@ -85,6 +99,7 @@ export const SERVICE_PREFAB_PREFERENCE: Readonly<Record<ServiceNeed, readonly Re
   // The schooling ladder: high school first (the step the first jobs for the educated ask), elementary where none stands, then the college and the university
   // (locked until development points buy them: `#provideServices` buys them only while jobs for the educated stand open).
   education: [/^HighSchool\d+$/, /^ElementarySchool\d+$/, /^College\d+$/, /^University\d+$/],
+  transit: [/^BusDepot\d+$/],
 };
 
 /** The prefab-name searches that find the buildings of a need (the unlocked ones are then picked by `SERVICE_PREFAB_PREFERENCE`). */
@@ -96,13 +111,14 @@ export const SERVICE_PREFAB_QUERIES: Readonly<Record<ServiceNeed, readonly strin
   roads: ["RoadMaintenance"],
   garbage: ["Incinerat", "Recycl", "Landfill"],
   education: ["HighSchool", "ElementarySchool", "College", "University"],
+  transit: ["BusDepot"],
 };
 
 /**
  * Starting figures, not rules: people per building of each kind, so a city is never given a dozen of them for one stubborn icon.
  * The icons themselves decide whether another is wanted (they must still be there after the last one has had time to work).
  */
-export const SERVICE_POPULATION_PER_BUILDING: Readonly<Record<ServiceNeed, number>> = { deathcare: 4_000, healthcare: 2_500, police: 4_000, fire: 4_000, roads: 8_000, garbage: 10_000, education: 5_000 };
+export const SERVICE_POPULATION_PER_BUILDING: Readonly<Record<ServiceNeed, number>> = { deathcare: 4_000, healthcare: 2_500, police: 4_000, fire: 4_000, roads: 8_000, garbage: 10_000, education: 5_000, transit: 25_000 };
 /** Cycles to wait after placing one before judging whether the icons went. */
 export const SERVICE_COOLDOWN_CYCLES = 3;
 /** The same cooldown in game hours (`game-clock.ts`); the cycle count is the fallback when the game clock cannot be read. */
@@ -230,11 +246,16 @@ export function reserveSpotIndices(spots: readonly ReservableSpot[]): number[] {
   return nearest.length === 4 ? nearest.map((entry) => entry.index) : [];
 }
 
-/** The centre and clear radius of a reserved lot, from the spots left unpainted. */
-export function reservedLotOf(spots: readonly ReservableSpot[], indices: readonly number[]): { center: SpatialPoint2; radius: number } | null {
+/** The radius a reserved lot is cleared with when the caller does not size it (the district's small lot as it stood before 2026-10-08). */
+export const RESERVED_LOT_RADIUS_METERS = 52;
+/**
+ * The centre and clear radius of a reserved lot, from the spots left unpainted. `radiusMeters` is the half of the lot the game's own `lotSize` asks for
+ * (`golden-block.ts`, live 2026-10-08) — never smaller than the historical 52 m, so a lot is only ever cleared wider, never narrower.
+ */
+export function reservedLotOf(spots: readonly ReservableSpot[], indices: readonly number[], radiusMeters = RESERVED_LOT_RADIUS_METERS): { center: SpatialPoint2; radius: number } | null {
   if (indices.length === 0) return null;
   const points = indices.map((index) => spots[index]!.center);
-  return { center: { x: points.reduce((sum, p) => sum + p.x, 0) / points.length, z: points.reduce((sum, p) => sum + p.z, 0) / points.length }, radius: 52 };
+  return { center: { x: points.reduce((sum, p) => sum + p.x, 0) / points.length, z: points.reduce((sum, p) => sum + p.z, 0) / points.length }, radius: Math.max(radiusMeters, RESERVED_LOT_RADIUS_METERS) };
 }
 
 /**

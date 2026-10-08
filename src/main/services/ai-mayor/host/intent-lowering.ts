@@ -126,7 +126,8 @@ export function combineGoals(goals: ReadonlyArray<MayorStructuredGoalIntent | nu
   let care: MayorStructuredGoalIntent | null = null;
   if (careGoals.length === 1) care = careGoals[0]!;
   else if (careGoals.length > 1) {
-    const issues = [...new Set(careGoals.flatMap((goal) => careFocusFrom(goal) ?? []))];
+    // EDUCATION is a care focus with no goal of its own (it answers the labour market): it is not named in a combined goal.
+    const issues = [...new Set(careGoals.flatMap((goal) => careFocusFrom(goal) ?? []))].filter((issue): issue is Exclude<typeof issue, "EDUCATION"> => issue !== "EDUCATION");
     const priority = careGoals.some((goal) => goal.priority === "HIGH") ? "HIGH" : "NORMAL";
     care = { kind: "GOAL", type: "RESOLVE_ISSUES", priority, scope: { issues } };
   }

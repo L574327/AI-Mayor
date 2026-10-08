@@ -36,6 +36,8 @@ export const isHomes = (use: GovernedUse): boolean => use === "low" || use === "
 export const DEMAND_OPEN_MINIMUM = 10;
 export const DEMAND_SMOOTH_HOURS = 1;
 export const DEMAND_SMOOTH_SAMPLES = 4;
+/** Homes' demand is averaged over this long (game hours): see `#smoothedDemand`. */
+export const HOMES_DEMAND_HOURS = 6;
 /** A use whose own empty zoning has not filled for this long (game hours) is closed for new supply. */
 export const STUCK_HOURS = 6;
 /** Empty cells below this are no stock to judge (a few lots waiting are normal). */
@@ -75,7 +77,7 @@ export interface GovernorSample {
   demand: Partial<Record<GovernedUse, number | null>>;
 }
 
-export interface UseVerdict { open: boolean; reason: string; empty: number; filledInWindow: number | null }
+export interface UseVerdict { open: boolean; reason: string; empty: number; filledInWindow: number | null; /** The averaged building demand the verdict was made on. */ demand?: number | null }
 export interface Suspension { family: string; sinceFrame: number | null; sinceCycle: number; hours: number; why: string }
 export interface GovernorVerdict {
   uses: Record<GovernedUse, UseVerdict>;
@@ -181,9 +183,12 @@ export class GrowthGovernor {
    */
   #smoothedDemand(use: GovernedUse, now: GovernorSample): number | null {
     const values: number[] = [];
+    // Homes over the longer window: their demand is 0 every time new houses stand empty and 100 again as people move in (live 2026-10-08: 0 and 100 in turn,
+    // runs of 0 for half an hour), so an hour's average closed homes in the very moments the next houses were needed, and the city waited with no stock.
+    const hours = isHomes(use) ? HOMES_DEMAND_HOURS : DEMAND_SMOOTH_HOURS;
     for (let index = this.#samples.length - 1; index >= 0; index -= 1) {
       const sample = this.#samples[index]!;
-      if (values.length >= DEMAND_SMOOTH_SAMPLES && elapsed(sample.stamp, now.stamp, DEMAND_SMOOTH_HOURS)) break;
+      if (values.length >= DEMAND_SMOOTH_SAMPLES && elapsed(sample.stamp, now.stamp, hours)) break;
       const value = sample.demand[use];
       if (typeof value === "number") values.push(value);
     }
@@ -195,14 +200,14 @@ export class GrowthGovernor {
     const demand = this.#smoothedDemand(use, sample);
     const window = this.#gainOver(use, STUCK_HOURS, sample);
     const filledInWindow = window ? window.gain : null;
-    if (demand !== null && demand < DEMAND_OPEN_MINIMUM) return { open: false, reason: `the game has no building demand for it (${Math.round(demand)} on average)`, empty, filledInWindow };
+    if (demand !== null && demand < DEMAND_OPEN_MINIMUM) return { open: false, reason: `the game has no building demand for it (${Math.round(demand)} on average)`, empty, filledInWindow, demand };
     if (empty >= STUCK_MINIMUM_EMPTY && window && window.gain < Math.max(STUCK_MINIMUM_FILL, empty * STUCK_FILL_SHARE)) {
-      return { open: false, reason: `${empty} cells stand empty and ${Math.max(0, window.gain)} filled in ${window.hours.toFixed(1)} game hours`, empty, filledInWindow };
+      return { open: false, reason: `${empty} cells stand empty and ${Math.max(0, window.gain)} filled in ${window.hours.toFixed(1)} game hours`, empty, filledInWindow, demand };
     }
     if (this.isSuspended(supplyFamily("ZONE", use), sample.stamp) && this.isSuspended(supplyFamily("LAY", use), sample.stamp)) {
-      return { open: false, reason: "its supply is suspended (no effect measured)", empty, filledInWindow };
+      return { open: false, reason: "its supply is suspended (no effect measured)", empty, filledInWindow, demand };
     }
-    return { open: true, reason: `demand ${demand === null ? "?" : Math.round(demand)}, ${empty} empty${filledInWindow !== null ? `, +${filledInWindow} built in ${STUCK_HOURS} h` : ""}`, empty, filledInWindow };
+    return { open: true, reason: `demand ${demand === null ? "?" : Math.round(demand)}, ${empty} empty${filledInWindow !== null ? `, +${filledInWindow} built in ${STUCK_HOURS} h` : ""}`, empty, filledInWindow, demand };
   }
 
   /** Population and monthly balance gained per game hour since the oldest sample of the progress window (null with too short a history). */

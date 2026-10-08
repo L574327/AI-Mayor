@@ -25,6 +25,8 @@ export const DISTRICT_UTILITY_KINDS: readonly DistrictUtilityKind[] = ["electric
 /** Thermal power plants (fuel-burning), as opposed to turbines. */
 export const THERMAL_PLANT = /^(Small)?(Coal|Gas)PowerPlant\d+$/;
 export const PLANT_FOOTPRINT_RADIUS_METERS = 60;
+/** What a thermal plant draws from the water network (live 2026-10-08: SmallCoalPowerPlant01 put the city's use from 51,000 to 66,000 when placed). */
+export const THERMAL_PLANT_WATER_UNITS = 16_000;
 /** The sewage treatment plant: sited like a plant, not like an outlet. */
 export const TREATMENT_PLANT = /^WastewaterTreatmentPlant\d+$/;
 /**
@@ -32,7 +34,13 @@ export const TREATMENT_PLANT = /^WastewaterTreatmentPlant\d+$/;
  * street (live 2026-10-07: a coal plant set 90 m back had its front 30 m off the street, its own road was blocked by water, and it stood without a road);
  * the game's object preflight refuses the ones that overlap the street, and a far one has its access road dry-run before it is placed.
  */
-export const PLANT_SETBACKS_METERS: readonly number[] = [50, 60, 70, 90, 120, 160];
+/**
+ * The player's rule (2026-10-08, seen in the game): a plant's door either touches the street, or stands a whole road's corridor off it — never between
+ * (live: a coal plant 90 m back had its doors 30 m off a Medium Road: too far to touch, too near for a road along its front, and the only road the Mayor
+ * could lay was an 18 m spike). With the plant's half depth ~60 m (SmallCoalPowerPlant01's doors 59.8 m from its centre): "touching" is half depth + the
+ * street's half width + a little (68-78 m), "a corridor" leaves room for a Small Road beside the street (100 m and on). 80-99 m is never offered.
+ */
+export const PLANT_SETBACKS_METERS: readonly number[] = [68, 71, 74, 78, 100, 108, 130, 160];
 
 export const DISTRICT_UTILITY_FACILITY: Record<DistrictUtilityKind, { prefab: string; footprintRadiusMeters: number }> = {
   electricity: { prefab: "WindTurbine03", footprintRadiusMeters: 14 },
@@ -449,6 +457,18 @@ export async function realizeUtilityShortfall(port: DistrictUtilitiesPort, input
       if (placement.attached !== true) break;
       if (output === null || !(output > 0)) { unknownOutputPlaced = true; break; }
       covered += output;
+    }
+  }
+  // A thermal plant drinks (the player's rule, 2026-10-08: "if power needs a coal plant, add the pumping station with it"): live, a SmallCoalPowerPlant01
+  // joined to the streets put 600-940 buildings around it without water although the city-wide capacity stood far above use; one WaterTower03 placed beside
+  // the plant cleared every one within a reading, and one placed 400 m off among the dry homes did not. So the water goes beside the plant, at once.
+  if (input.kind === "electricity") {
+    for (const plant of placements.filter((placement) => THERMAL_PLANT.test(placement.prefab) && placement.attached === true)) {
+      if (input.signal?.aborted) break;
+      notes.push(`water for ${plant.prefab} at (${plant.position.x.toFixed(0)},${plant.position.z.toFixed(0)}): a thermal plant draws about ${THERMAL_PLANT_WATER_UNITS}; water is placed beside it`);
+      const water = await realizeUtilityShortfall(port, { ...input, kind: "water", shortfall: THERMAL_PLANT_WATER_UNITS, target: plant.position,
+        avoid: [...(input.avoid ?? []), plant.position], siting: undefined }, notes);
+      placements.push(...water.placements);
     }
   }
   const exhausted = covered < input.shortfall && !unknownOutputPlaced && !outletStands && placements.length < REALIZATION_MAXIMUM_PLACEMENTS &&

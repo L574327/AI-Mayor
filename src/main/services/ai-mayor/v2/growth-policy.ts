@@ -1,4 +1,5 @@
 import { MINIMUM_RECTANGLE_AREA_SQUARE_METERS } from "./district-land";
+import { GOLDEN_SPACING_METERS } from "./golden-block";
 
 /**
  * FAST_EXPANSION V2 — the growth decisions of the policy candidate (docs/FAST_EXPANSION_V2 Gameplay Policy Candidate.md), as pure functions.
@@ -282,12 +283,19 @@ export function capitalAreaCap(input: { treasury: number; monthlyBalance: number
 
 /**
  * THE TEMPLATE DISTRICT (the player's ruling, 2026-10-08: "split into the most reasonable, healthy districts, then just copy them"). The policy's own
- * growth lays districts of at most this side — three blocks by three (120/160/120 m), one ring of collector road and small streets inside — one after
+ * growth lays districts of at most this side — four blocks by four at the district's own street spacing (112 m, the whole number of blocks nearest the
+ * 400 m it was sized at before), one ring of collector road and small streets inside — one after
  * another as the city takes them up, instead of one 1,200 x 760 m grid the city needs an hour to fill (live 2026-10-08: ten such districts in ten minutes,
  * 54,000 zoned cells, 16,700 of them shops and offices that never grew). A player who names a place or a size is not held to it.
  */
-export const TEMPLATE_DISTRICT_SIDE_METERS = 400;
+export const TEMPLATE_DISTRICT_SIDE_METERS = 4 * GOLDEN_SPACING_METERS;
 export const TEMPLATE_DISTRICT_SQUARE_METERS = TEMPLATE_DISTRICT_SIDE_METERS * TEMPLATE_DISTRICT_SIDE_METERS;
+/**
+ * The streets inside a template district are this far apart: the guide's optimum for the Small Road a district is laid with (x = 2W + 96 = 112 m,
+ * ~86% of the block zoned; `golden-block.ts`). Not a multiple of the 40 m planning lattice, so a district plan carries its own spacing
+ * (`planRectangularGrid`'s `spacingMeters`) and the leftover at the far edges is what `fillGaps` fills.
+ */
+export const TEMPLATE_DISTRICT_STREET_SPACING_METERS = GOLDEN_SPACING_METERS;
 /** Zoned residential cells of one template district (60% of its ground is lots, 64 m² a cell). */
 export const TEMPLATE_DISTRICT_CELLS = Math.round(TEMPLATE_DISTRICT_SQUARE_METERS * 0.6 / 64);
 /**

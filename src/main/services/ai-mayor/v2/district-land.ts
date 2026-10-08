@@ -177,9 +177,9 @@ export interface LandRectangle {
  * leaving the free land. Rectangles smaller than a two-block grid are not returned. Rectangles overlap; the caller
  * takes the biggest, and the next cycle's mask (with that district's streets in it) yields the next.
  */
-export function maximalRectangles(mask: LandMask, limit = 40): LandRectangle[] {
+export function maximalRectangles(mask: LandMask, limit = 40, minimumSideMeters = MINIMUM_RECTANGLE_SIDE_METERS, minimumAreaSquareMeters = MINIMUM_RECTANGLE_AREA_SQUARE_METERS): LandRectangle[] {
   const { columns, rows, free, spacing, origin } = mask;
-  const minCells = Math.ceil(MINIMUM_RECTANGLE_SIDE_METERS / spacing);
+  const minCells = Math.ceil(minimumSideMeters / spacing);
   const found = new Map<string, { column: number; row: number; width: number; height: number }>();
   const heights = new Array<number>(columns).fill(0);
   const isFree = (column: number, row: number) => row >= 0 && row < rows && column >= 0 && column < columns && free[row * columns + column] === 1;
@@ -207,7 +207,7 @@ export function maximalRectangles(mask: LandMask, limit = 40): LandRectangle[] {
   return [...found.values()]
     .map((cells) => ({ minX: origin.x + cells.column * spacing, minZ: origin.z + cells.row * spacing,
       widthMeters: cells.width * spacing, heightMeters: cells.height * spacing }))
-    .filter((rectangle) => rectangle.widthMeters * rectangle.heightMeters >= MINIMUM_RECTANGLE_AREA_SQUARE_METERS)
+    .filter((rectangle) => rectangle.widthMeters * rectangle.heightMeters >= minimumAreaSquareMeters)
     .sort((left, right) => right.widthMeters * right.heightMeters - left.widthMeters * left.heightMeters ||
       left.minX - right.minX || left.minZ - right.minZ)
     .slice(0, limit);
@@ -217,8 +217,15 @@ export function maximalRectangles(mask: LandMask, limit = 40): LandRectangle[] {
  * Block widths that sum to at most `totalMeters`, from the product's 120 m and 160 m blocks (the spacing that fills
  * with buildings), as balanced as the total allows. A total no mix of the two reaches (40, 80, 200) is shortened to the
  * next one that is. Null when even 120 m does not fit.
+ *
+ * `uniformBlockMeters` overrides both: every block is that wide, and the total is shortened to the whole number of them that fits (the guide's own
+ * spacing — `TEMPLATE_DISTRICT_STREET_SPACING_METERS`; the remainder is what `fillGaps` fills). Null when not even one fits.
  */
-export function composeBlocks(totalMeters: number): number[] | null {
+export function composeBlocks(totalMeters: number, uniformBlockMeters = 0): number[] | null {
+  if (uniformBlockMeters > 0) {
+    const count = Math.floor(totalMeters / uniformBlockMeters);
+    return count >= 1 ? new Array<number>(count).fill(uniformBlockMeters) : null;
+  }
   for (let total = Math.floor(totalMeters / 40) * 40; total >= 120; total -= 40) {
     let best: { small: number; large: number } | null = null;
     for (let large = 0; large * 160 <= total; large += 1) {

@@ -607,6 +607,12 @@ export interface RectangularGridPlanInput {
   columnWidths: readonly number[];
   /** Block size along z. Each a whole number of lattice spacings. */
   rowHeights: readonly number[];
+  /**
+   * The unit every block size must be a whole multiple of, in metres. Defaults to the 40 m planning lattice. A district lays its own streets at the
+   * guide's optimum for the road it uses (`TEMPLATE_DISTRICT_STREET_SPACING_METERS`, 112 m for a Small Road) — which is NOT a multiple of 40, so the
+   * plan carries its own unit: the lattice is only what the plan measures itself in.
+   */
+  spacingMeters?: number;
 }
 
 /**
@@ -630,7 +636,7 @@ export interface RectangularGridSegment {
   start: SpatialPoint2;
   end: SpatialPoint2;
   lengthMeters: number;
-  /** Endpoint lattice coordinates, in `GRID_LATTICE_SPACING_METERS` steps from the anchor. */
+  /** Endpoint lattice coordinates, in the plan's own spacing steps from the anchor (`spacingMeters`, 40 m unless the plan says otherwise). */
   latticeStart: { i: number; j: number };
   latticeEnd: { i: number; j: number };
   /** Reserved hierarchy. `planRectangularGrid` emits LOCAL; a collection's ring promotes to ARTERIAL. */
@@ -668,7 +674,7 @@ export interface RectangularGridSegment {
  * course is submitted.
  */
 export function planRectangularGrid(input: RectangularGridPlanInput): RectangularGridSegment[] {
-  const spacing = GRID_LATTICE_SPACING_METERS;
+  const spacing = input.spacingMeters ?? GRID_LATTICE_SPACING_METERS;
   const { anchor } = input;
   if (input.columnWidths.length === 0 || input.rowHeights.length === 0) {
     throw new Error("a rectangular grid needs at least one column and one row");

@@ -39,7 +39,8 @@ describe("district builder: the player-style decision layer", () => {
   test("offers the biggest district on empty owned land, joined to the served network by a short gateway", () => {
     const [best] = surveyDistrictSites({ world: servedWorld(), buildings: [], maximumAreaSquareMeters: 224_000 });
     expect(best).toBeDefined();
-    expect(best!.widthMeters * best!.heightMeters).toBe(560 * 400);
+    // The biggest shape under the cap: four blocks by three at the template's own 112 m street spacing.
+    expect(best!.widthMeters * best!.heightMeters).toBe(448 * 336);
     expect(best!.gateway.lengthMeters).toBeLessThanOrEqual(80);
     // The district stays clear of the existing road.
     expect(best!.anchor.z).toBeGreaterThanOrEqual(-62.5 + 12);
@@ -247,12 +248,15 @@ describe("district builder: the player-style decision layer", () => {
     const rectangle = { minX: 82.5, minZ: -2.5, widthMeters: 480, heightMeters: 200 };
     const uncapped = surveyDistrictSites({ world, buildings: [], rectangles: [rectangle] });
     expect(uncapped.length).toBeGreaterThan(0);
-    expect(uncapped[0]!.widthMeters * uncapped[0]!.heightMeters).toBeGreaterThan(57_600);
+    // Whole 112 m blocks inside the rectangle: four across, one deep (the 40 m remainder is the gap filler's).
+    expect(uncapped[0]!.widthMeters).toBe(448);
+    expect(uncapped[0]!.heightMeters).toBe(112);
     // A tight treasury: the same ground still yields a district, sized to the cap.
-    const capped = surveyDistrictSites({ world, buildings: [], rectangles: [rectangle], maximumAreaSquareMeters: 57_600 });
+    const capped = surveyDistrictSites({ world, buildings: [], rectangles: [rectangle], maximumAreaSquareMeters: 25_088 });
     expect(capped.length).toBeGreaterThan(0);
-    for (const site of capped) expect(site.widthMeters * site.heightMeters).toBeLessThanOrEqual(57_600);
-    // A cap too small for any district (under two blocks a side) still offers nothing.
+    for (const site of capped) expect(site.widthMeters * site.heightMeters).toBeLessThanOrEqual(25_088);
+    expect(Math.max(...capped.map((site) => site.widthMeters * site.heightMeters))).toBe(25_088);
+    // A cap too small for any district (under one block a side) still offers nothing.
     expect(surveyDistrictSites({ world, buildings: [], rectangles: [rectangle], maximumAreaSquareMeters: 10_000 })).toEqual([]);
   });
   test("a refused line is halved at a lattice point, down to one block", () => {
@@ -289,16 +293,17 @@ describe("district builder: the player-style decision layer", () => {
     const world = { roadGraph: wide.roadGraph, ownedTiles: [{ ...wide.ownedTiles[0]!, bounds: { min: { x: -100, z: -100 }, max: { x: 1400, z: 1000 } },
       polygon: [{ x: -100, z: -100 }, { x: 1400, z: -100 }, { x: 1400, z: 1000 }, { x: -100, z: 1000 }] }] } as never;
     const [founding] = surveyDistrictSites({ world, buildings: [] });
-    expect(founding!.widthMeters * founding!.heightMeters).toBe(1120 * 680);
+    // Eight blocks by five at the template's own 112 m street spacing.
+    expect(founding!.widthMeters * founding!.heightMeters).toBe(896 * 560);
     const [capped] = surveyDistrictSites({ world, buildings: [], maximumAreaSquareMeters: 224_000 });
-    expect(capped!.widthMeters * capped!.heightMeters).toBe(560 * 400);
+    expect(capped!.widthMeters * capped!.heightMeters).toBe(448 * 336);
     // The ground refusing the founding district at its corner leaves the smaller districts at that corner on offer.
-    const refused = new Set([`${Math.round(founding!.anchor.x)},${Math.round(founding!.anchor.z)},1120x680`]);
+    const refused = new Set([`${Math.round(founding!.anchor.x)},${Math.round(founding!.anchor.z)},896x560`]);
     const [next] = surveyDistrictSites({ world, buildings: [], excludedAnchors: refused });
     expect(`${next!.anchor.x},${next!.anchor.z},${next!.widthMeters}`).not.toBe(`${founding!.anchor.x},${founding!.anchor.z},${founding!.widthMeters}`);
     // Every founding anchor refused: the corner falls back to the next size down, never to nothing.
     const all = new Set(surveyDistrictSites({ world, buildings: [], limit: 200 }).map((site) => `${Math.round(site.anchor.x)},${Math.round(site.anchor.z)},${site.widthMeters}x${site.heightMeters}`));
-    const [smaller] = surveyDistrictSites({ world, buildings: [], excludedAnchors: all, maximumAreaSquareMeters: 1120 * 680 });
+    const [smaller] = surveyDistrictSites({ world, buildings: [], excludedAnchors: all, maximumAreaSquareMeters: 896 * 560 });
     expect(smaller).toBeDefined();
   });
 

@@ -1,7 +1,7 @@
 import {
   absorbableCells, ABSORPTION_LOOKAHEAD_DAYS, batchConstraint, capitalAreaCap, capitalReserve, chooseResidentialDensity, DEVIATION_RESERVE, FinanceWatch,
   decideGrowthAfterSearch, FRAMES_PER_GAME_DAY, gameMonthKey, growthAdmission, growthDecaying, growthStage, LOW_DENSITY_QUOTA_SHARE, netGrowthPerDay, NEGATIVE_MONTHS_FREEZE,
-  SMALLEST_DISTRICT_SQUARE_METERS, type DensityState, type ResidentialDensityKey,
+  SMALLEST_DISTRICT_SQUARE_METERS, TEMPLATE_DISTRICT_SIDE_METERS, type DensityState, type ResidentialDensityKey,
 } from "../../src/main/services/ai-mayor/v2/growth-policy";
 import { immediateWithoutAnswer, notificationTier, triageNotifications } from "../../src/main/services/ai-mayor/v2/notification-tiers";
 import { decideLoan, GROWTH_BORROW_SHARE, loanTier, type LoanReading } from "../../src/main/services/ai-mayor/v2/loan-policy";
@@ -509,7 +509,7 @@ describe("V2 in the district builder", () => {
   });
 
   test("a batch the size of one template district is one district", async () => {
-    // (220,000 - 150,000 reserve) x 0.8 / 0.3 = about 187,000 m2: one 400 x 400 template, and less than a district left over.
+    // (220,000 - 150,000 reserve) x 0.8 / 0.3 = about 187,000 m2: one template district at most, and less than a district left over.
     const result = await new DistrictBuilder(harness({ series: growingSeries(200), mix: mixWith(byDensity([40_000, 100, 30], [8_000, 100, 80])) }), { maximumSitesPerCycle: 1 })
       .runCycle(cycleInput({ finance: { treasury: 220_000, monthlyBalance: 0 } }));
     expect(result.status).toBe("BUILT");
@@ -521,7 +521,24 @@ describe("V2 in the district builder", () => {
       .runCycle(cycleInput({ finance: { treasury: 260_000, monthlyBalance: 0 } }));
     const sizes = [...result.notes.join(" | ").matchAll(/district \([-\d.]+,[-\d.]+\) (\d+)x(\d+) residential/g)].map((match) => [Number(match[1]), Number(match[2])]);
     expect(sizes.length).toBeGreaterThan(0);
-    for (const [width, height] of sizes) { expect(width).toBeLessThanOrEqual(400); expect(height).toBeLessThanOrEqual(400); }
+    for (const [width, height] of sizes) { expect(width).toBeLessThanOrEqual(TEMPLATE_DISTRICT_SIDE_METERS); expect(height).toBeLessThanOrEqual(TEMPLATE_DISTRICT_SIDE_METERS); }
+  });
+
+  test("the strip between two districts too narrow for one of them is joined by a street (the gap filler, the player's rule 2026-10-08)", async () => {
+    const roads: string[] = [];
+    // Two long streets 120 m apart with a 80 m strip between them, closed at both ends by a street whose end sits in the strip.
+    const a = node(0, 0), b = node(800, 0), c = node(0, 120), d = node(800, 120), e = node(0, 60), f = node(800, 60);
+    const world = {
+      roadGraph: { nodes: [a, b, c, d, e, f], edges: [edge(a, b), edge(c, d), edge(a, e), edge(f, d)] },
+      ownedTiles: [{ entity: { index: 1, version: 1 }, owned: true, bounds: { min: { x: 0, z: 0 }, max: { x: 800, z: 200 } }, center: { x: 400, z: 100 },
+        polygon: [{ x: 0, z: 0 }, { x: 800, z: 0 }, { x: 800, z: 200 }, { x: 0, z: 200 }] }],
+    };
+    // Cash enough that the land policy is not holding the city back (a held city spends nothing, gaps included).
+    const result = await new DistrictBuilder(harness({ roads, series: growingSeries(200), mix: mixWith(byDensity([40_000, 100, 30], [8_000, 100, 80])), world }), { maximumSitesPerCycle: 1 })
+      .runCycle(cycleInput({ finance: { treasury: 1_500_000, monthlyBalance: 100_000 } }));
+    expect(result.status).toBe("GAP_FILLED");
+    expect(roads).toHaveLength(1);
+    expect(result.notes.join(" | ")).toMatch(/gap: a Small Road laid/);
   });
 
   test("snowball: the next district follows the empty zoning of the density being laid, never the stock of a density left out", async () => {

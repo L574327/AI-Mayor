@@ -48,6 +48,30 @@ describe("precise hands: the generator catalogue is read from the scan the Bridg
   });
 });
 
+describe("a thermal plant drinks: water is placed beside it (the player's rule, 2026-10-08)", () => {
+  test("a coal plant that stands brings a water facility near it; a wind turbine does not", async () => {
+    const base = world({ ranking: [], legal: ["SmallCoalPowerPlant01", "WindTurbine03", "WaterTower03"], output: { SmallCoalPowerPlant01: 200_000, WindTurbine03: 5_000, WaterTower03: 10_000 } });
+    const placedAt: Array<{ prefab: string; x: number; z: number }> = [];
+    const place = base.port.place.bind(base.port);
+    const port: DistrictUtilitiesPort = {
+      ...base.port,
+      rankPrefabs: async (kind) => kind === "electricity" ? ["SmallCoalPowerPlant01"] : ["WaterTower03"],
+      place: async (prefab, point, rotation, signal) => { placedAt.push({ prefab, x: point.x, z: point.z }); return place(prefab, point, rotation, signal); },
+    };
+    const notes: string[] = [];
+    const result = await realizeUtilityShortfall(port, input(50_000), notes);
+    expect(result.placements.map((placement) => placement.prefab)).toEqual(["SmallCoalPowerPlant01", "WaterTower03", "WaterTower03"]);
+    const plant = placedAt[0]!;
+    const tower = placedAt[1]!;
+    expect(Math.hypot(tower.x - plant.x, tower.z - plant.z)).toBeLessThan(400);
+    expect(notes.join(" | ")).toMatch(/a thermal plant draws about 16000; water is placed beside it/);
+    const wind = world({ ranking: [], legal: ["WindTurbine03", "WaterTower03"], output: { WindTurbine03: 5_000 } });
+    const windPort: DistrictUtilitiesPort = { ...wind.port, rankPrefabs: async (kind) => kind === "electricity" ? ["WindTurbine03"] : ["WaterTower03"] };
+    await realizeUtilityShortfall(windPort, input(4_000), []);
+    expect(wind.placed).toEqual(["WindTurbine03"]);
+  });
+});
+
 describe("precise hands: a utility shortage is realized, not attempted once", () => {
   test("the top three candidates have no site; the fourth stands (the 2026-10-04 live failure)", async () => {
     const { port, placed } = world({ ranking: ["SmallCoalPowerPlant01", "WindTurbine01", "WindTurbine02", "WindTurbine03"], legal: ["WindTurbine03"],

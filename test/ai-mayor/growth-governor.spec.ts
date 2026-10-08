@@ -48,6 +48,22 @@ describe("the growth governor: a flickering demand reading does not open and clo
   });
 });
 
+describe("the growth governor: homes' demand is read over hours", () => {
+  test("live 2026-10-08: the homes' bar at 0 for an hour after new houses, then 100 — homes stay open and the stock is kept ready; shops judged on the hour", () => {
+    const governor = new GrowthGovernor();
+    let verdict = governor.observe(at(0, { demand: { low: 100, commercial: 100 } }));
+    for (let step = 1; step <= 30; step += 1) {
+      const hour = step * 0.2;
+      // 4 game hours at 100, then 2 at 0 (the new houses stand empty).
+      const value = hour <= 4 ? 100 : 0;
+      verdict = governor.observe(at(hour, { demand: { low: value, commercial: value }, built: { low: 29_000 + step * 40 } }));
+    }
+    expect(verdict.uses.low.open).toBe(true);
+    expect(verdict.uses.low.demand).toBeGreaterThan(10);
+    expect(verdict.uses.commercial.open).toBe(false);
+  });
+});
+
 describe("the growth governor: the next dead loop is seen and broken, whatever its cause", () => {
   test("BUSY: districts laid for a whole window with no progress — the busiest supply is suspended, and the suspension ends", () => {
     const governor = new GrowthGovernor();

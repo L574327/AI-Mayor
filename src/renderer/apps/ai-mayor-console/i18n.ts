@@ -79,7 +79,7 @@ const zh = {
   "work.wait.HOUSING_HELD": "等现有住房住满，暂不新建住宅", "work.wait.NO_USABLE_NONE_SUPPLY": "等待住宅需求或新密度解锁",
   "work.wait.NO_USABLE_HOUSING_SUPPLY": "暂时没有适合建住宅的地块", "work.wait.BATCH_BELOW_ONE_DISTRICT": "资金或需求还不够建一个区块",
   "work.wait.TREASURY_COVER": "资金不足，暂停扩张", "work.wait.POLICY_WAIT": "按策略等待",
-  "work.BUILT": "铺设了一个新区块", "work.UTILITY_REPAIRED": "修复了水电", "work.LAND_PURCHASED": "买了一块地", "work.NO_SITE": "观察城市，暂不施工",
+  "work.BUILT": "铺设了一个新区块", "work.UTILITY_REPAIRED": "修复了水电", "work.LAND_PURCHASED": "买了一块地", "work.GAP_FILLED": "在缝里补了一条街", "work.NO_SITE": "观察城市，暂不施工",
   "work.watching": "观察城市",
 } as const;
 
@@ -160,7 +160,7 @@ const en: Record<ConsoleKey, string> = {
   "work.wait.HOUSING_HELD": "Waiting for existing homes to fill before building more", "work.wait.NO_USABLE_NONE_SUPPLY": "Waiting for housing demand or a new density",
   "work.wait.NO_USABLE_HOUSING_SUPPLY": "No suitable land for homes right now", "work.wait.BATCH_BELOW_ONE_DISTRICT": "Funds or demand do not cover a district yet",
   "work.wait.TREASURY_COVER": "Funds too low; expansion paused", "work.wait.POLICY_WAIT": "Waiting by policy",
-  "work.BUILT": "Laid a new district", "work.UTILITY_REPAIRED": "Restored water/power", "work.LAND_PURCHASED": "Bought a tile", "work.NO_SITE": "Watching the city; no construction",
+  "work.BUILT": "Laid a new district", "work.UTILITY_REPAIRED": "Restored water/power", "work.LAND_PURCHASED": "Bought a tile", "work.GAP_FILLED": "Filled a gap with a street", "work.NO_SITE": "Watching the city; no construction",
   "work.watching": "Watching the city",
 };
 

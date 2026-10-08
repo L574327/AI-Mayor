@@ -44,11 +44,16 @@ export interface SpendGuardConfig {
   marginFraction: number;
 }
 
-export const DEFAULT_SPEND_GUARD: SpendGuardConfig = { mode: "ADAPTIVE", floorFraction: 0.3, hourlyFraction: 0.15, marginFraction: 0.03 };
+/**
+ * The floor was 30% of the takeover funds until 2026-10-08: on a new 1,000,000 city it kept 330,000 idle for good, and a two-hour run spent its second half
+ * mostly waiting at it while every district it laid filled (the player: "too conservative early; loans are fine"). The runaway it was made against is
+ * held by the hourly cap; the floor only keeps a cushion.
+ */
+export const DEFAULT_SPEND_GUARD: SpendGuardConfig = { mode: "ADAPTIVE", floorFraction: 0.1, hourlyFraction: 0.15, marginFraction: 0.02 };
 
 /** The tools that spend the city's money. */
 export const SPENDING_TOOLS: ReadonlySet<string> = new Set([
-  "cs2_build_road", "cs2_place_building", "cs2_purchase_tile", "cs2_replace_road", "cs2_upgrade_road", "cs2_transit_line_create", "cs2_mayor_execute_actions",
+  "cs2_build_road", "cs2_place_building", "cs2_purchase_tile", "cs2_replace_road", "cs2_upgrade_road", "cs2_transit_line_create", "cs2_transit_stop_place", "cs2_mayor_execute_actions",
 ]);
 
 /** Whether this call can spend: a spending tool that is not a preview or a dry run. */
