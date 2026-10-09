@@ -9,7 +9,7 @@
 import type { ZoneCategory, ZoningMixSignals } from "./zoning-mix";
 import { unrealizedShare } from "./zoning-mix";
 import type { GrowthStage } from "./growth-policy";
-import { stageRank } from "./growth-policy";
+import { DEMANDED_USE_MINIMUM, stageRank } from "./growth-policy";
 import { GAME_HOUR_FRAMES, stampElapsed, type GameStamp } from "./game-clock";
 
 /** What the game's labour reading says. Rates may arrive as a fraction or as a percent; both are accepted. */
@@ -91,8 +91,9 @@ export function classifyBottleneck(labor: LaborReading | null, residentialDemand
 
 /** Unbuilt zoning at or below this share of a use's zoning is a small stock: the use is plainly being filled. */
 export const SMALL_STOCK_SHARE = 0.35;
-/** The game's own demand scale is 0–100; a use at or above this is one the city is asking for. */
-export const DEMANDED_USE_MINIMUM = 50;
+// The game's own demand scale is 0–100; a use at or above this is one the city is asking for. It lives in `growth-policy.ts` (that module needs it too and
+// the other direction would make the two a cycle); re-exported so every existing reader keeps its import.
+export { DEMANDED_USE_MINIMUM };
 /** Cycles of stock readings kept to see which way the unbuilt zoning is moving. */
 export const STOCK_HISTORY_CYCLES = 5;
 /**

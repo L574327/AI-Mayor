@@ -24,7 +24,12 @@ export const DISTRICT_ROAD_GRADE_PERCENT = 20;
 export const GATEWAY_ROAD_GRADE_PERCENT = 35;
 /** Water deeper than this is not land. */
 export const LAND_WATER_DEPTH_METERS = 0.05;
-/** Smallest rectangle worth a street grid: two blocks each way. */
+/**
+ * Smallest rectangle worth a street grid: two blocks each way. Deliberately NOT expressed in the district's own 112 m grid: that figure belongs to
+ * `MINIMUM_REALIZATION_AREA_SQUARE_METERS` (the batch's "anything left to deliver" line), and the two must move together — a survey that offers districts
+ * smaller than the batch's own minimum makes the policy read "no site" and "a site exists" at the same time. The leftover ground between districts is
+ * reached by the gap filler instead (`gapRectangles` in `district-builder.ts`, read down to `STRIP_MINIMUM_METERS` with the `holdsMiniDistrict` rule).
+ */
 export const MINIMUM_RECTANGLE_SIDE_METERS = 160;
 export const MINIMUM_RECTANGLE_AREA_SQUARE_METERS = 40_000;
 

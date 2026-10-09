@@ -166,12 +166,19 @@ describe("district builder: the player-style decision layer", () => {
       readLabor: async () => ({ employed: 267, unemploymentRate: 0.35, jobsTotal: 267, jobsFree: 9 }),
     });
     const input = { demand: { residential: 80, commercial: 30, industrial: 10 }, zoneFor: () => "EU Residential Medium" };
-    // With no industry on offer (locked) the jobless city simply gets no new homes.
+    // With industry locked, the jobless city gets no new HOMES: the job-bearing use that IS on offer takes the district instead (live 2026-10-08: 26 of
+    // 83 cycles waited on `NO_USABLE_JOBS_SUPPLY` while industry was closed and shops stood open with demand and were growing).
     const noIndustry = { ...input, zoneFor: (category: string) => category === "residential" || category === "commercial" ? "EU Residential Medium" : null };
-    const held = await new DistrictBuilder(port()).runCycle({ ...noIndustry, pipelined: true });
-    expect(held.status).toBe("NO_SITE");
-    expect(writes.filter((write) => write.startsWith("road"))).toHaveLength(0);
-    expect(held.notes.join(" | ")).toMatch(/bottleneck JOBS/);
+    const commercial = await new DistrictBuilder(port(), { maximumSitesPerCycle: 1 }).runCycle({ ...noIndustry, pipelined: true });
+    expect(commercial.notes.join(" | ")).toMatch(/bottleneck JOBS/);
+    expect(commercial.notes.join(" | ")).toMatch(/policy chose commercial for JOBS/);
+    expect(commercial.notes.join(" | ")).not.toMatch(/policy chose residential/);
+    // With no job-bearing use on offer at all there is still nothing to build, and not one street is laid for it (`writes` is shared across the runs).
+    const nothing = { ...input, zoneFor: (category: string) => category === "residential" ? "EU Residential Medium" : null };
+    const before = writes.length;
+    const bare = await new DistrictBuilder(port()).runCycle({ ...nothing, pipelined: true });
+    expect(bare.status).toBe("NO_SITE");
+    expect(writes.length).toBe(before);
     // With industry on offer, the next district is an industrial one.
     const industrial = await new DistrictBuilder(port(), { maximumSitesPerCycle: 1 }).runCycle({ ...input, pipelined: true });
     expect(industrial.notes.join(" | ")).toMatch(/policy chose industrial for JOBS/);

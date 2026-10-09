@@ -2,7 +2,7 @@ import type { SpatialLocalTerrain, SpatialPoint2, SpatialRoadEdge, SpatialRoadNo
 import { pointInTile } from "../spatial/world-scanner";
 import { filterGridSegmentsByTerrain, GRID_LATTICE_SPACING_METERS, planRectangularGrid } from "./road-grid-generator";
 import { roadComponents, SERVED_COMPONENT_MIN_STREETS, type RoadComponent } from "./road-components";
-import { cashCoversExpansion, civicIsAffordable, EXPANSION_DEVIATION_RESERVE, expansionCashRequired, LAND_ESCAPE_RUNWAY_MONTHS, LAND_PURCHASE_CASH_RESERVE, landPurchaseAffordable, landPurchaseRunwayAffordable } from "./solvency";
+import { cashCoversExpansion, civicIsAffordable, EXPANSION_DEVIATION_RESERVE, expansionCashRequired, LAND_ESCAPE_RUNWAY_MONTHS, landPurchaseAffordable, landPurchaseRunwayAffordable } from "./solvency";
 import { corridorCandidates, deadEndClosures } from "./district-corridors";
 import { instrumentDistrictPort, refusalReason, roadContext, type ExecutionOutcomeRecorder } from "./execution-telemetry";
 import { isStraightContinuationOfDeadEnd, roadAttemptFeatures, streetSegments } from "./road-attempt-features";
@@ -97,7 +97,7 @@ const THERMAL_PLANT_PREFABS = ["SmallCoalPowerPlant01", "CoalPowerPlant01", "Gas
 const darkKey = (point: SpatialPoint2): string => `${Math.round(point.x / 400)},${Math.round(point.z / 400)}`;
 import { linkTrainStation, railAnchor, TRAIN_LINK_MAXIMUM_ATTEMPTS, type TrainLinkPort } from "./train-link";
 import { ensureTrainLoop, type TransitPort } from "./transit-lines";
-import { fillGaps, GOLDEN_SPACING_METERS, gridCells, reserveCells, smallServiceLotSideMeters, STRIP_MINIMUM_METERS, type ServiceSpec } from "./golden-block";
+import { fillGaps, GOLDEN_SPACING_METERS, gridCells, holdsMiniDistrict, reserveCells, smallServiceLotSideMeters, STRIP_MINIMUM_METERS, type ServiceSpec } from "./golden-block";
 import { cornersNearest, doorSides, GROWABLE_PREFAB, WRAP_ATTEMPTS_PER_BUILDING, WRAP_CLEARANCES_METERS, wrapPieces, wrapRing, wrapSides } from "./wrap-road";
 import { BUS_MINIMUM_POPULATION, BUS_REVIEW_CYCLES, BUS_REVIEW_HOURS, ensureBusLine, newBusMemory, roadsideBusStop, type BusPort } from "./bus-lines";
 import {
@@ -320,8 +320,6 @@ const UTILITY_OUTAGE_ICON = /^(Electricity|Water|Sewage) Notification/i;
 export const SNOWBALL_LAND_AHEAD_TEMPLATES = 4;
 /** A tile's price when the game has not quoted one lately (measured 2026-10-08: 52,531 then 70,429; it rises with every tile). */
 export const LAND_AHEAD_TILE_PRICE_ESTIMATE = 75_000;
-/** Land is bought only while the cash is this many times the last tile's price (`#tilePriceBought`). */
-export const TILE_CASH_MULTIPLE = 3;
 export const SNOWBALL_LAND_AHEAD_AFTER_BUILD_HOURS = 2;
 export const SNOWBALL_LAND_AHEAD_AFTER_BUILD_CYCLES = 10;
 export const NOISE_INDUSTRY_REACH_METERS = 200;
@@ -1550,6 +1548,8 @@ export class DistrictBuilder {
   // ---- FAST_EXPANSION V2 (growth-policy.ts) — memory of this process only; a rebaseline forgets it and the world is read afresh ----
   /** Stage and density this cycle chose (pipelined mode), and the batch it may build. */
   #stage: GrowthStage = "S0";
+  /** Read each cycle in `#planGrowth`: the next milestone is within `max(300, 10%)` XP (see there). A signature landmark may then be placed even frozen. */
+  #milestoneNear = false;
   #chosenDensity: DistrictDensity | null = null;
   #batch: Constraint | null = null;
   /** Residential area laid in this process: low density against all, for the low-density quota from S3 on. */
@@ -1595,6 +1595,7 @@ export class DistrictBuilder {
     this.#refusedPlacements.clear();
     this.#serviceCycle = 0;
     this.#cycles = 0;
+    this.#milestoneNear = false;
     this.#loanBlockedUntil = 0;
     this.#loanBlockedSince = null;
     this.#frame = null;
@@ -1858,9 +1859,11 @@ export class DistrictBuilder {
     if (holdNote) result.notes.push(holdNote);
     for (const line of repairNotes) result.notes.push(`repair: ${line}`);
     // One land use without land must not stop the city: hold it out of the next choices for a few game hours so the cycle that follows takes
-    // the next use that answers the bottleneck. Only a COMPLETE search counts (an unread or cut-short one proves nothing), and only a use the
-    // policy chose (a named request is never silently swapped for another).
-    if (input.pipelined && !input.intent?.role && this.#cycleRole && result.status === "NO_SITE" && result.feasibility && "survey" in result.feasibility &&
+    // the next use that answers the bottleneck. Only a COMPLETE search counts (an unread or cut-short one proves nothing), only a use the
+    // policy chose (a named request is never silently swapped for another), and only a search that found NO GROUND (`!result.waitReason`):
+    // the land calls that hold a purchase — the cash, the tile bought last, the high-density rule — carry the same feasibility and used to
+    // hold the use out for three hours as if the ground had refused it (they are `wait(...)`, so a wait reason is set; a real no-site return has none).
+    if (input.pipelined && !input.intent?.role && this.#cycleRole && result.status === "NO_SITE" && !result.waitReason && result.feasibility && "survey" in result.feasibility &&
       result.feasibility.reason === "NO_SITE_IN_BOUNDED_SEARCH" && result.feasibility.coverage.complete) {
       this.#roleNoSiteSince.set(this.#cycleRole, this.#stamp(this.#cycles));
       result.notes.push(`role ${this.#cycleRole} has no site; held out for ${this.#frame !== null ? `${ROLE_NO_SITE_BLOCK_HOURS} game hours` : `${ROLE_NO_SITE_BLOCK_CYCLES} cycles`}, the next use is tried`);
@@ -2088,7 +2091,7 @@ export class DistrictBuilder {
     if (!plan?.frozen) { try { await this.#taxLever(input, notes); } catch (error) { notes.push(`tax: ${error instanceof Error ? error.message.slice(0, 120) : "failed"}`); } }
     if (!plan?.frozen) { try { await this.#withdrawStaleZoning(world, input, notes, landUse); } catch (error) { notes.push(`stale zoning: ${error instanceof Error ? error.message.slice(0, 120) : "failed"}`); } }
     if (!plan?.frozen) { try { await this.#linkTrain(world, input, notes); } catch (error) { notes.push(`train: ${error instanceof Error ? error.message.slice(0, 120) : "failed"}`); } }
-    if (!plan?.frozen) { try { await this.#placeSignatures(world, input, notes); } catch (error) { notes.push(`signature: ${error instanceof Error ? error.message.slice(0, 120) : "failed"}`); } }
+    if (!plan?.frozen || this.#milestoneNear) { try { await this.#placeSignatures(world, input, notes); } catch (error) { notes.push(`signature: ${error instanceof Error ? error.message.slice(0, 120) : "failed"}`); } }
     // P8: after K negative months the growth stops and only repairs go on (the services above and the utility repairs of the Brain).
     if (plan?.frozen) return wait("FINANCE_FROZEN");
     // Homes the city cannot use yet are not laid on new ground; the cycle ends here and the city runs, instead of waiting on it.
@@ -2143,8 +2146,8 @@ export class DistrictBuilder {
     const spillRectangles = landMask ? maximalRectangles(landMask.mask, 60, STRIP_MINIMUM_METERS, STRIP_MINIMUM_METERS * STRIP_MINIMUM_METERS) : [];
     const gapRectangles = spillRectangles.filter((rectangle) => (Math.min(rectangle.widthMeters, rectangle.heightMeters) < MINIMUM_RECTANGLE_SIDE_METERS
         || rectangle.widthMeters * rectangle.heightMeters < MINIMUM_RECTANGLE_AREA_SQUARE_METERS)
-      // Two blocks of the district's own grid or more (2x1 and up): the share `fillGaps` calls a mini district.
-      && Math.floor(rectangle.widthMeters / TEMPLATE_DISTRICT_STREET_SPACING_METERS) * Math.floor(rectangle.heightMeters / TEMPLATE_DISTRICT_STREET_SPACING_METERS) >= 2);
+      // The same "2 x 1 blocks" judgement the rectangle minimum is built on (`golden-block.ts` `holdsMiniDistrict`): one rule, not two.
+      && holdsMiniDistrict(rectangle.widthMeters, rectangle.heightMeters));
     if (landMask && baseRectangles) {
       const free = landMask.mask.free.reduce((sum, cell) => sum + cell, 0);
       const freeHectares = free * landMask.mask.spacing * landMask.mask.spacing / 10_000;
@@ -2355,23 +2358,24 @@ export class DistrictBuilder {
     }
     // No owned land holds a district: buy the next tile, the way a player expands when the map runs out. A named
     // place narrows the tiles to the ones that are there, nearest the place first.
-    // K34: land is paid for out of earnings. Without a finance reading the caller's own permission stands (tests, tools);
-    // with one, the recurring upkeep a tile adds must fit the monthly surplus. A player who asked for land by name
-    // overrides the surplus test, never the cash reserve that the district on that land needs.
+    // K34: land is paid for out of earnings. Without a finance reading the caller's own permission stands (tests, tools); with one, the recurring upkeep a
+    // tile adds must fit the monthly surplus and the cash must pay for the tile — NOT pass a fixed reserve (the flat 100,000/150,000 demanded money a city
+    // earning 705,599 a month did not need; live 2026-10-08). A player who asked for land by name is held only to payability.
     // A tile bought ahead of need in this very cycle (`#buyLandAhead`) is this cycle's answer to "no site": the new land shows in the next world read.
     if (this.#boughtAheadThisCycle && !namedPlace) return { ...empty(), status: "LAND_PURCHASED", feasibility };
     const owned = world.ownedTiles.filter((tile) => tile.owned).length;
+    // What the next tile is thought to cost: the game's own quote when it refused one, else what the last tile bought cost (`#purchaseNextTile` keeps both).
+    const nextTilePrice = this.#tileCostSeen ?? this.#tilePriceBought;
     let landAllowed = input.finance
       ? (intent?.acquireLand
-        ? input.finance.treasury >= LAND_PURCHASE_CASH_RESERVE
-        // LIVE_REVALIDATION_PENDING: the purchase protections (reach, buildable share, one unused tile at a time) and this cash rule were
-        // added after the 2026-10-04 over-buying incident and have only been exercised on that already-damaged world.
+        ? input.finance.treasury >= (nextTilePrice ?? LAND_AHEAD_TILE_PRICE_ESTIMATE)
+        // LIVE_REVALIDATION_PENDING: the purchase protections (reach, buildable share, one unused tile at a time) were added after the 2026-10-04
+        // over-buying incident and have only been exercised on the world that left behind.
         : landPurchaseAffordable({ ...input.finance, ownedTiles: owned, tileUpkeep: costs?.tileUpkeep ?? null, monthlyExpenses: costs?.monthlyExpenses ?? null,
-          observedMarginalUpkeep: this.#observedMarginalTileUpkeep,
-          ...(input.pipelined ? { requiredCash: expansionCashRequired(input.finance.monthlyBalance) } : {}) }))
+          observedMarginalUpkeep: this.#observedMarginalTileUpkeep, ...(nextTilePrice !== null ? { tilePrice: nextTilePrice } : {}) }))
       : true;
-    // Snowball: a tile is bought whenever the cash keeps its reserve (the runway and upkeep rules are the steady mode's).
-    if (this.#snowball() && input.finance && input.finance.treasury >= LAND_PURCHASE_CASH_RESERVE) landAllowed = true;
+    // Snowball: a tile is bought whenever the cash can pay for it (the surplus and runway rules are the steady mode's).
+    if (this.#snowball() && input.finance && input.finance.treasury >= (nextTilePrice ?? LAND_AHEAD_TILE_PRICE_ESTIMATE)) landAllowed = true;
     // Land is bought when the land already owned is used, not when there is money: while the zoning on hand stands mostly
     // empty, the city has capacity it has not filled.
     const zonedAll = ZONE_CATEGORIES.reduce((sum, category) => sum + this.#mix.cells[category].zoned, 0);
@@ -2466,10 +2470,12 @@ export class DistrictBuilder {
         notes.push(`tile (${point.x.toFixed(0)},${point.z.toFixed(0)}): the next tile costs ${Math.round(this.#tileCostSeen)} and the cash is ${Math.round(this.#cashNow)}; not asked yet`);
         return "REFUSED";
       }
-      // The price is not known before the purchase (the Bridge cannot quote it): the dearest tile bought lately stands for it. Land is bought only while
-      // the cash is TILE_CASH_MULTIPLE times that price (live 2026-10-08: one tile cost 115,790 and took the cash from 147,000 to 27,000 in one step).
-      if (this.#tilePriceBought !== null && this.#cashNow !== null && this.#cashNow < this.#tilePriceBought * TILE_CASH_MULTIPLE) {
-        notes.push(`tile (${point.x.toFixed(0)},${point.z.toFixed(0)}): the last tile cost ${Math.round(this.#tilePriceBought)}; land waits until the cash is ${TILE_CASH_MULTIPLE}x that (now ${Math.round(this.#cashNow)})`);
+      // The price is not known before the purchase (the Bridge cannot quote it): the dearest tile bought lately stands for it. The cash must pay that price
+      // AND still leave what a district on the ground costs. The player's rule of 2026-10-08 was a flat 3x the price — 347,070 against a 115,790 tile —
+      // which no city that is actually growing ever reaches (live 2026-10-08: 22 tiles owned, +705,599 a month, land refused for hours on end).
+      const districtCost = SMALLEST_DISTRICT_SQUARE_METERS * COST_PER_SQUARE_METER;
+      if (this.#tilePriceBought !== null && this.#cashNow !== null && this.#cashNow < this.#tilePriceBought + districtCost) {
+        notes.push(`tile (${point.x.toFixed(0)},${point.z.toFixed(0)}): the last tile cost ${Math.round(this.#tilePriceBought)} and the district on it about ${Math.round(districtCost)}; land waits until the cash covers both (now ${Math.round(this.#cashNow)})`);
         return "REFUSED";
       }
       const bought = await this.port.purchaseTile(point, signal);
@@ -2897,7 +2903,9 @@ export class DistrictBuilder {
     const tiles = world.ownedTiles.filter((tile) => tile.owned && tile.bounds);
     const nodes = network.nodes.map((node) => ({ x: node.position.x, z: node.position.z }));
     const centre = nodes.length > 0 ? { x: nodes.reduce((sum, node) => sum + node.x, 0) / nodes.length, z: nodes.reduce((sum, node) => sum + node.z, 0) / nodes.length } : { x: 0, z: 0 };
-    const candidates = signatureCandidates({ edges: network.edges, nodes, isOwned: (point) => tiles.some((tile) => pointInTile(point, tile)), centre });
+    // A signature is a landmark, not the service a kept lot was measured for (`#reservedGround`): those lots are left to the clinics, police and fire.
+    const candidates = signatureCandidates({ edges: network.edges, nodes, isOwned: (point) => tiles.some((tile) => pointInTile(point, tile)), centre })
+      .filter((candidate) => !this.#reservedGround().some((lot) => Math.hypot(lot.position.x - candidate.position.x, lot.position.z - candidate.position.z) < lot.radius));
     for (const prefab of wanted) {
       if (signal?.aborted) break;
       this.#signatureTriedAt.set(prefab, stamp);
@@ -2988,9 +2996,10 @@ export class DistrictBuilder {
     const costs = this.#costs;
     // Land ahead of need is bought only out of cash the districts do not need: after the tile, the batch reserve and one template district must still stand.
     const tilePrice = this.#tileCostSeen ?? LAND_AHEAD_TILE_PRICE_ESTIMATE;
-    const spare = input.finance.treasury - capitalReserve(costs?.monthlyExpenses ?? null, plannerSpendFloor(input.finance)) - TEMPLATE_DISTRICT_SQUARE_METERS * COST_PER_SQUARE_METER;
-    const affordable = input.finance.treasury >= LAND_PURCHASE_CASH_RESERVE && spare >= tilePrice && (snowball || landPurchaseRunwayAffordable({ ...input.finance, ownedTiles: owned, tileUpkeep: costs?.tileUpkeep ?? null,
-      monthlyExpenses: costs?.monthlyExpenses ?? null, observedMarginalUpkeep: this.#observedMarginalTileUpkeep, requiredCash: expansionCashRequired(input.finance.monthlyBalance) }));
+    const spare = input.finance.treasury - capitalReserve(costs?.monthlyExpenses ?? null, plannerSpendFloor(input.finance), input.finance.monthlyBalance) - TEMPLATE_DISTRICT_SQUARE_METERS * COST_PER_SQUARE_METER;
+    // The `spare` above is the whole cash test: after the tile, the batch reserve and one template district must still stand. No fixed reserve gate.
+    const affordable = spare >= tilePrice && (snowball || landPurchaseRunwayAffordable({ ...input.finance, ownedTiles: owned, tileUpkeep: costs?.tileUpkeep ?? null,
+      monthlyExpenses: costs?.monthlyExpenses ?? null, observedMarginalUpkeep: this.#observedMarginalTileUpkeep, tilePrice }));
     if (!affordable) return false;
     const tiles = world.ownedTiles.filter((tile) => tile.owned && tile.bounds);
     if (tiles.length === 0) return false;
@@ -3946,7 +3955,7 @@ export class DistrictBuilder {
       const homes = (await this.port.listBuildings(input.signal)).filter((building) => classifyBuilding(building.prefab) === "sensitive").map((building) => building.position);
       const realization = await realizeUtilityShortfall(port, { kind: "electricity", shortfall: cluster.size * DARK_HOME_WANTED_UNITS, target: cluster.center,
         edges: component.edges, ...(detail?.terrain ? { terrain: detail.terrain } : {}), avoid: lotsToAvoid(detail), siting: { city: centreOf(homes) ?? cluster.center, homes },
-        placementMemory: { refused: this.#refusedPlacements, cycle: stamp }, excludedAround: this.#accessFailedSites, ...(input.signal ? { signal: input.signal } : {}) }, notes);
+        placementMemory: { refused: this.#refusedPlacements, cycle: stamp }, excludedAround: [...this.#accessFailedSites, ...this.#reservedGround()], ...(input.signal ? { signal: input.signal } : {}) }, notes);
       this.#rememberOwn(realization.placements);
       const key = darkKey(cluster.center);
       this.#darkPlacements.set(key, (this.#darkPlacements.get(key) ?? 0) + realization.placements.length);
@@ -3995,7 +4004,7 @@ export class DistrictBuilder {
       }
       const realization = await realizeUtilityShortfall(port, { kind: "water", shortfall: Math.max(DRY_MINIMUM_WANTED_UNITS, share * DRY_HOME_WANTED_UNITS, drawnBy ? THERMAL_PLANT_WATER_UNITS : 0), target,
         edges: component.edges, ...(detail?.terrain ? { terrain: detail.terrain } : {}), avoid: lotsToAvoid(detail), siting: { city: centreOf(homes) ?? cluster.center, homes },
-        placementMemory: { refused: this.#refusedPlacements, cycle: stamp }, excludedAround: this.#accessFailedSites, ...(input.signal ? { signal: input.signal } : {}) }, notes);
+        placementMemory: { refused: this.#refusedPlacements, cycle: stamp }, excludedAround: [...this.#accessFailedSites, ...this.#reservedGround()], ...(input.signal ? { signal: input.signal } : {}) }, notes);
       this.#rememberOwn(realization.placements);
       const key = darkKey(cluster.center);
       this.#dryPlacements.set(key, (this.#dryPlacements.get(key) ?? 0) + realization.placements.length);
@@ -4130,6 +4139,10 @@ export class DistrictBuilder {
       officeUnlocked: input.unlocked?.office ?? false, immigrationDecaying: growthDecaying(series) });
     this.#stage = verdict.stage;
     const xpGap = progress && progress.xp !== null && progress.nextMilestoneXp !== null ? progress.nextMilestoneXp - progress.xp : null;
+    // The milestones are the early game's surest money and unlocks (the guides: XP is granted on placement and kept), so a step that costs nothing to keep
+    // — a signature landmark — is not stopped by a frozen growth plan when the next one is within reach. Same two figures the host uses to see the pop-up
+    // coming (`main-adapters.ts` MILESTONE_NEAR_SHARE / MILESTONE_NEAR_MINIMUM_XP).
+    this.#milestoneNear = xpGap !== null && progress?.nextMilestoneXp !== null && xpGap <= Math.max(300, (progress?.nextMilestoneXp ?? 0) * 0.1);
     notes.push(`growth V2 (game ${POLICY_GAME_VERSION}): stage ${verdict.stage} (${verdict.detail})${xpGap !== null ? `; ${Math.max(0, xpGap)} XP to the next milestone` : ""}`);
     // P8: a hard constraint. The rolling monthly balance negative for K months in a row stops growth; repairs go on.
     if (input.finance) this.#financeWatch.observe(gameMonthKey(progress?.gameDateTime), input.finance.monthlyBalance);
@@ -4994,7 +5007,17 @@ export class DistrictBuilder {
     this.options.experience?.record("access-road", (trial.prefab || "?").replace(/\d+$/, ""), "starved-water", "REFUSED");
   }
 
-  /** The roads laid to one facility this cycle, judged at the next reading. */
+  /**
+   * The ground kept for public services (`#reservedLots`): lots a clinic, a police station or a fire house was measured to fit (`golden-block.ts`).
+   * Every facility siting path excludes it — a water tower or a generator standing on one takes that place for good (live 2026-10-08: a WaterTower03 sat
+   * in a district's kept lot). The exclusion lifts when a service takes the lot (`#provideServices` removes it).
+   */
+  #reservedGround(): Array<{ position: SpatialPoint2; radius: number }> {
+    return this.#reservedLots.map((lot) => ({ position: lot.center, radius: lot.radius }));
+  }
+
+  /**
+   * The roads laid to one facility this cycle, judged at the next reading. */
   #accessTrial: { prefab: string; at: SpatialPoint2; outagesBefore: number; courses: Array<{ start: SpatialPoint2; end: SpatialPoint2 }>; waterAsked?: boolean } | null = null;
   /** The trial being filled while the access roads of the current spot are laid (null otherwise). */
   #accessTrialOpen: { prefab: string; at: SpatialPoint2; outagesBefore: number; courses: Array<{ start: SpatialPoint2; end: SpatialPoint2 }> } | null = null;
@@ -5072,7 +5095,7 @@ export class DistrictBuilder {
         // facilities if one is not enough (`realizeUtilityShortfall`).
         const realization = await realizeUtilityShortfall(port, { kind, shortfall: input.shortfalls[kind] ?? 1, target,
           edges: component.edges, ...(detail?.terrain ? { terrain: detail.terrain } : {}), avoid, siting: { city: target, homes },
-          placementMemory: { refused: this.#refusedPlacements, cycle: this.#stamp(this.#cycles) }, ...(input.signal ? { signal: input.signal } : {}) }, notes);
+          placementMemory: { refused: this.#refusedPlacements, cycle: this.#stamp(this.#cycles) }, excludedAround: [...this.#accessFailedSites, ...this.#reservedGround()], ...(input.signal ? { signal: input.signal } : {}) }, notes);
         this.#rememberOwn(realization.placements);
         placed.push(...realization.placements);
         // Every candidate was searched and none can stand: waiting for it would only hold the city's zoning for nothing (see the zoning hold).
@@ -5134,7 +5157,7 @@ export class DistrictBuilder {
         if (input.signal?.aborted) break;
         const realization = await realizeUtilityShortfall(port, { kind: entry.kind, shortfall: entry.shortfall, target: center,
           edges: component.edges, ...(detail?.terrain ? { terrain: detail.terrain } : {}), avoid, siting: { city: centreOf(homes) ?? center, homes },
-          placementMemory: { refused: this.#refusedPlacements, cycle: this.#stamp(this.#cycles) }, excludedAround: this.#accessFailedSites, ...(input.signal ? { signal: input.signal } : {}) }, notes);
+          placementMemory: { refused: this.#refusedPlacements, cycle: this.#stamp(this.#cycles) }, excludedAround: [...this.#accessFailedSites, ...this.#reservedGround()], ...(input.signal ? { signal: input.signal } : {}) }, notes);
         this.#repairedAt.set(entry.kind, repairStamp);
         this.#rememberOwn(realization.placements);
         placed.push(...realization.placements);

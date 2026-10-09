@@ -28,9 +28,15 @@ describe("a land use without land is held out and the next one is tried (nine id
       expect(chooseGrowthRole({ ...base, bottleneck: "JOBS" })).toBe("industrial");
       expect(chooseGrowthRole({ ...base, bottleneck: "JOBS", blocked: [] })).toBe("industrial");
     });
-    test("control: industry LOCKED or oversupplied (not 'no land') is still no district: commercial does not stand in", () => {
-      expect(chooseGrowthRole({ ...base, bottleneck: "JOBS", available: ["residential", "commercial"] })).toBeNull();
-      expect(chooseGrowthRole({ ...base, bottleneck: "JOBS", paused: ["industrial"] })).toBeNull();
+    // The live 2026-10-08 case: 26 of 83 cycles waited on `NO_USABLE_JOBS_SUPPLY` while industry was closed by the governor ("391 cells stand empty and
+    // 0 filled in 6.3 game hours") and commercial was OPEN with demand 27–35 and shops growing. Industry held for any reason now lets shops stand in.
+    test("industry held (no land, locked, or closed on its own empty stock) lets commercial stand in", () => {
+      expect(chooseGrowthRole({ ...base, bottleneck: "JOBS", available: ["residential", "commercial"] })).toBe("commercial");
+      expect(chooseGrowthRole({ ...base, bottleneck: "JOBS", paused: ["industrial"] })).toBe("commercial");
+    });
+    test("control: with no job-bearing use left open there is still nothing to build", () => {
+      expect(chooseGrowthRole({ ...base, bottleneck: "JOBS", available: ["residential"] })).toBeNull();
+      expect(chooseGrowthRole({ ...base, bottleneck: "JOBS", paused: ["industrial", "commercial"] })).toBeNull();
     });
     test("control: homes are never stood in for by another use", () => {
       expect(chooseGrowthRole({ ...base, bottleneck: "HOUSING", blocked: ["residential"] })).toBeNull();

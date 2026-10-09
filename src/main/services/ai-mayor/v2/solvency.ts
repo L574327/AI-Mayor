@@ -42,8 +42,10 @@ export const FREE_MAP_TILES = 9;
 export const MEASURED_MINIMUM_MARGINAL_TILE_UPKEEP = 20_000;
 /** The next tile costs more than the average one (the rate on all tiles rises with the count): margin over the average. */
 export const MARGINAL_TILE_UPKEEP_MARGIN = 1.25;
-/** Cash a land purchase must leave behind for the district that goes on it (a district costs about 15k). */
-export const LAND_PURCHASE_CASH_RESERVE = 100_000;
+/** Cash a land purchase must leave behind, as hours of the city's own net outflow (a city that earns more than it spends leaves nothing). */
+export const LAND_RESERVE_HOURS = 6;
+/** Game hours in a game month (30 days): the bridge between the game's monthly figures and an hourly rule. */
+export const GAME_HOURS_PER_MONTH = 30 * 24;
 /** Building outward needs cash for this many months of spending, whatever the monthly balance says. */
 export const EXPANSION_CASH_MONTHS = 3;
 
@@ -80,10 +82,19 @@ export function cashCoversExpansion(input: { treasury: number | null; monthlyExp
  * district sizing already holds back. Both are starting values, not rules.
  */
 export const RUNWAY_REALIZATION_MONTHS = 2;
+/**
+ * A flat yardstick of "comfortable cash" for the LOAN rules (`loan-policy.ts`: how large a loan may be, when one is repaid). It is deliberately NOT part of
+ * the land rule any more: as a land gate it demanded 150,000 whatever the city's size or earnings, so a city earning 705,599 a month and holding 53,148
+ * refused every tile it could easily pay for (live 2026-10-08), and it also shrank every district's batch through `capitalReserve`.
+ */
 export const EXPANSION_DEVIATION_RESERVE = 150_000;
+/**
+ * Cash the expansion itself must carry: the net outflow of `RUNWAY_REALIZATION_MONTHS` months, and nothing else. A city that earns more than it spends needs
+ * no cash reserve at all — its income pays the build as it goes (the guide's rule: land is bought when the income carries the tile, one tile at a time).
+ */
 export function expansionCashRequired(monthlyBalance: number | null | undefined): number {
   const outflowPerMonth = typeof monthlyBalance === "number" && monthlyBalance < 0 ? -monthlyBalance : 0;
-  return EXPANSION_DEVIATION_RESERVE + outflowPerMonth * RUNWAY_REALIZATION_MONTHS;
+  return outflowPerMonth * RUNWAY_REALIZATION_MONTHS;
 }
 
 /**
@@ -92,10 +103,17 @@ export function expansionCashRequired(monthlyBalance: number | null | undefined)
  * district on it and for the months of spending that expansion needs. `ownedTiles` null (unknown) is treated as past the free tiles.
  */
 export function landPurchaseAffordable(input: { treasury: number | null; monthlyBalance: number | null; ownedTiles: number | null;
-  tileUpkeep?: number | null; monthlyExpenses?: number | null; requiredCash?: number; observedMarginalUpkeep?: number | null }): boolean {
+  tileUpkeep?: number | null; monthlyExpenses?: number | null; requiredCash?: number; observedMarginalUpkeep?: number | null;
+  /** What the next tile is thought to cost (`#tilePriceBought`, or the game's own quote when it refused). Absent: only the surplus test is applied. */
+  tilePrice?: number | null }): boolean {
   if (input.treasury === null || input.monthlyBalance === null) return false;
-  if (input.treasury < LAND_PURCHASE_CASH_RESERVE) return false;
-  if (!cashCoversExpansion({ treasury: input.treasury, monthlyExpenses: input.monthlyExpenses ?? null, ...(input.requiredCash !== undefined ? { requiredCash: input.requiredCash } : {}) })) return false;
+  const price = typeof input.tilePrice === "number" && input.tilePrice > 0 ? input.tilePrice : 0;
+  // The cash pays for the tile itself...
+  if (input.treasury < price) return false;
+  // ...and what is left carries the city's own net outflow for `LAND_RESERVE_HOURS` (nothing at all for a city that earns more than it spends).
+  const outflowPerHour = input.monthlyBalance < 0 ? -input.monthlyBalance / GAME_HOURS_PER_MONTH : 0;
+  if (input.treasury - price - (input.requiredCash ?? 0) < outflowPerHour * LAND_RESERVE_HOURS) return false;
+  // The surplus itself must carry the upkeep the tile adds for ever: the recurring cost is what has to fit, not the bank balance (`marginalTileUpkeep`).
   const added = marginalTileUpkeep({ ownedTiles: input.ownedTiles === null ? FREE_MAP_TILES : input.ownedTiles, tileUpkeep: input.tileUpkeep ?? null,
     observedMarginalUpkeep: input.observedMarginalUpkeep ?? null });
   return input.monthlyBalance - added >= 0;
@@ -114,14 +132,15 @@ export function landPurchaseAffordable(input: { treasury: number | null; monthly
  */
 export const LAND_ESCAPE_RUNWAY_MONTHS = 12;
 export function landPurchaseRunwayAffordable(input: { treasury: number | null; monthlyBalance: number | null; ownedTiles: number | null;
-  tileUpkeep?: number | null; monthlyExpenses?: number | null; requiredCash?: number; observedMarginalUpkeep?: number | null }): boolean {
+  tileUpkeep?: number | null; monthlyExpenses?: number | null; requiredCash?: number; observedMarginalUpkeep?: number | null; tilePrice?: number | null }): boolean {
   if (input.treasury === null || input.monthlyBalance === null) return false;
-  if (input.treasury < LAND_PURCHASE_CASH_RESERVE) return false;
-  if (!cashCoversExpansion({ treasury: input.treasury, monthlyExpenses: input.monthlyExpenses ?? null, ...(input.requiredCash !== undefined ? { requiredCash: input.requiredCash } : {}) })) return false;
+  const price = typeof input.tilePrice === "number" && input.tilePrice > 0 ? input.tilePrice : 0;
+  if (input.treasury < price) return false;
   const added = marginalTileUpkeep({ ownedTiles: input.ownedTiles === null ? FREE_MAP_TILES : input.ownedTiles, tileUpkeep: input.tileUpkeep ?? null,
     observedMarginalUpkeep: input.observedMarginalUpkeep ?? null });
   const deficitPerMonth = Math.max(0, added - input.monthlyBalance);
-  return input.treasury - LAND_PURCHASE_CASH_RESERVE >= deficitPerMonth * LAND_ESCAPE_RUNWAY_MONTHS;
+  // The deficit the tile creates, carried for the whole escape runway on the cash that is left after paying for the tile.
+  return input.treasury - price >= deficitPerMonth * LAND_ESCAPE_RUNWAY_MONTHS;
 }
 
 /**

@@ -1,5 +1,6 @@
 import { MINIMUM_RECTANGLE_AREA_SQUARE_METERS } from "./district-land";
 import { GOLDEN_SPACING_METERS } from "./golden-block";
+import { expansionCashRequired } from "./solvency";
 
 /**
  * FAST_EXPANSION V2 — the growth decisions of the policy candidate (docs/FAST_EXPANSION_V2 Gameplay Policy Candidate.md), as pure functions.
@@ -190,9 +191,8 @@ export const CAPITAL_SHARE_OF_CASH = 0.8;
  * 1,000,000+ m2 against a treasury of 80,000 in the first live run (2026-10-04).
  */
 export const CAPITAL_SURPLUS_MONTHS = 0.1;
-/** ⟨待标定⟩ Reserve = this share of one month's maintenance (the candidate says ⟨N months⟩), never below the study's deviation reserve. */
+/** ⟨待标定⟩ Reserve = this share of one month's maintenance (the candidate says ⟨N months⟩). */
 export const RESERVE_SHARE_OF_MONTHLY_MAINTENANCE = 0.1;
-export const DEVIATION_RESERVE = 150_000;
 /** Measured in the districts built so far: roads and zoning cost about this much per square metre (see runtime). */
 export const COST_PER_SQUARE_METER = 0.3;
 /** The smallest district the survey offers (240 × 240). */
@@ -262,12 +262,15 @@ export function operatingReserve(spendFloor: number | null | undefined): number 
 
 /**
  * The reserve a batch must leave in the treasury: never below the spending fuse's floor plus the operating band (`spendFloor`: the fuse's floor and
- * margin, null when the fuse stands down). A batch priced above the fuse's floor is a batch the fuse refuses half-way — the district's streets laid, its
- * way in refused, and the game showing the refused street's preview every cycle (live 2026-10-08: 290 refused writes in 30 minutes).
+ * margin, null when the fuse stands down), a share of a month's maintenance, or the cash the expansion itself must carry (`expansionCashRequired`: the net
+ * outflow of two months, nothing for a city that earns more than it spends). A batch priced above the fuse's floor is a batch the fuse refuses half-way —
+ * the district's streets laid, its way in refused, and the game showing the refused street's preview every cycle (live 2026-10-08: 290 refused writes in 30
+ * minutes). The flat 150,000 that used to live here was a ⟨待标定⟩ starting value that never scaled with the city; it made a profitable city size its
+ * districts down to nothing (live 2026-10-08: monthly balance +705,599, treasury 53,148, no land bought, no district priced).
  */
-export function capitalReserve(monthlyMaintenance: number | null, spendFloor: number | null = null): number {
+export function capitalReserve(monthlyMaintenance: number | null, spendFloor: number | null = null, monthlyBalance: number | null = null): number {
   const fuse = spendFloor !== null && spendFloor > 0 ? spendFloor + operatingReserve(spendFloor) : 0;
-  return Math.max(DEVIATION_RESERVE, (monthlyMaintenance ?? 0) * RESERVE_SHARE_OF_MONTHLY_MAINTENANCE, fuse);
+  return Math.max(fuse, (monthlyMaintenance ?? 0) * RESERVE_SHARE_OF_MONTHLY_MAINTENANCE, expansionCashRequired(monthlyBalance));
 }
 
 /**
@@ -275,7 +278,7 @@ export function capitalReserve(monthlyMaintenance: number | null, spendFloor: nu
  * than the spending fuse lets out in one game hour (`hourlyCap`), so a batch is never cut off half-way by the hourly cap either.
  */
 export function capitalAreaCap(input: { treasury: number; monthlyBalance: number; monthlyMaintenance: number | null; spendFloor?: number | null; hourlyCap?: number | null }): number {
-  const budget = Math.max(0, input.treasury - capitalReserve(input.monthlyMaintenance, input.spendFloor ?? null)) * CAPITAL_SHARE_OF_CASH
+  const budget = Math.max(0, input.treasury - capitalReserve(input.monthlyMaintenance, input.spendFloor ?? null, input.monthlyBalance)) * CAPITAL_SHARE_OF_CASH
     + Math.max(0, input.monthlyBalance) * CAPITAL_SURPLUS_MONTHS;
   const hourly = input.hourlyCap !== undefined && input.hourlyCap !== null && input.hourlyCap > 0 ? input.hourlyCap * CAPITAL_SHARE_OF_CASH : Infinity;
   return Math.max(0, Math.min(budget, hourly) / COST_PER_SQUARE_METER);
@@ -387,7 +390,11 @@ export interface GrowthFeasibility {
   rejectedSites: number;
 }
 
-/** Smallest geometric district the current planner offers after fitting blocks. */
+/**
+ * Smallest geometric district the current planner offers after fitting blocks. It must stay in step with the survey's own rectangle minimum
+ * (`MINIMUM_RECTANGLE_AREA_SQUARE_METERS`): the two were aliased until 2026-10-08, and the survey's minimum could only follow the district grid once this
+ * figure moved with it — a co-change with its own live verification, so it is still the old 4 ha here.
+ */
 export const MINIMUM_REALIZATION_AREA_SQUARE_METERS = MINIMUM_RECTANGLE_AREA_SQUARE_METERS;
 
 export function growthAdmission(input: { population: number | null; targetPopulation: number | null; utilityReadComplete: boolean }):
@@ -399,6 +406,12 @@ export function growthAdmission(input: { population: number | null; targetPopula
 }
 
 /** The one policy choice of which district supply to add; the builder only searches for the chosen role. */
+/**
+ * The game's own demand scale is 0–100; a use at or above this is one the city is asking for. Defined here (not in `growth-bottleneck.ts`, which reads it)
+ * because `chooseGrowthRole` below needs it too and importing the other way would make the two modules a cycle.
+ */
+export const DEMANDED_USE_MINIMUM = 50;
+
 export function chooseGrowthRole(input: { bottleneck: "HOUSING" | "JOBS" | "MATCH" | "NONE";
   demand: { residential: number; commercial: number; industrial: number };
   available: readonly string[]; paused: readonly string[];
@@ -415,11 +428,20 @@ export function chooseGrowthRole(input: { bottleneck: "HOUSING" | "JOBS" | "MATC
   if (input.bottleneck === "HOUSING") return roles.includes("residential") ? "residential" : null;
   if (input.bottleneck === "JOBS") {
     if (roles.includes("industrial")) return "industrial";
-    // Commercial is a job-bearing use too (V2 candidate P4), but only stands in for industry that has no LAND: locked or oversupplied industry
-    // still means no district. P4 also wants the shops' stock read first; that reading does not exist yet, so this fallback is unverified against it.
-    return blocked.includes("industrial") && roles.includes("commercial") ? "commercial" : null;
+    // Commercial is a job-bearing use too (V2 candidate P4), and it stands in for industry whenever industry cannot carry the jobs this cycle — no land
+    // for it (live 2026-10-04: nine cycles idle beside 131 ha) OR held back because its own zoning stands empty and is not filling (live 2026-10-08: 26 of
+    // 83 cycles waited on `NO_USABLE_JOBS_SUPPLY` while industry was closed on "391 cells stand empty and 0 filled in 6.3 game hours" and commercial was
+    // OPEN with demand 27–35 and shops growing). What "the game wants it" means is not a demand figure here: the governor already closed every use the
+    // game is not asking for (`growth-governor.ts`, demand under 10 or standing empty and not filling), so anything left in `roles` is a use the city is
+    // actually taking up. Nothing unwanted is built to fill a wait.
+    const industryHeld = blocked.includes("industrial") || input.paused.includes("industrial") || !input.available.includes("industrial");
+    return industryHeld && roles.includes("commercial") ? "commercial" : null;
   }
-  if (input.bottleneck === "MATCH") return null;
+  // MATCH is "jobs stand open that the unemployed cannot take: skills or reach are the limit" — more of the same fixes nothing, which is why it used to
+  // wait for ever. The game's own demand still says what the city wants, so the most-wanted use the governor left open is taken, and nothing at all when
+  // no use reaches `DEMANDED_USE_MINIMUM` (the waiting cycles of 2026-10-08 were exactly "the game asks for nothing").
+  if (input.bottleneck === "MATCH") return [...roles].filter((role) => input.demand[role] >= DEMANDED_USE_MINIMUM)
+    .sort((left, right) => input.demand[right] - input.demand[left])[0] ?? null;
   return [...roles].sort((left, right) => input.demand[right] - input.demand[left])[0] ?? null;
 }
 

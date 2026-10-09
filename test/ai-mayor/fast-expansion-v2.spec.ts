@@ -1,5 +1,5 @@
 import {
-  absorbableCells, ABSORPTION_LOOKAHEAD_DAYS, batchConstraint, capitalAreaCap, capitalReserve, chooseResidentialDensity, DEVIATION_RESERVE, FinanceWatch,
+  absorbableCells, ABSORPTION_LOOKAHEAD_DAYS, batchConstraint, capitalAreaCap, capitalReserve, chooseResidentialDensity, FinanceWatch,
   decideGrowthAfterSearch, FRAMES_PER_GAME_DAY, gameMonthKey, growthAdmission, growthDecaying, growthStage, LOW_DENSITY_QUOTA_SHARE, netGrowthPerDay, NEGATIVE_MONTHS_FREEZE,
   SMALLEST_DISTRICT_SQUARE_METERS, TEMPLATE_DISTRICT_SIDE_METERS, type DensityState, type ResidentialDensityKey,
 } from "../../src/main/services/ai-mayor/v2/growth-policy";
@@ -146,10 +146,13 @@ describe("V2 P2: the batch is the smaller of the cash cap and the absorption cap
     expect(batchConstraint({ capitalArea: capital, absorptionCells: null })).toMatchObject({ binding: "capital", absorptionArea: null });
     expect(batchConstraint({ capitalArea: 1_000_000, absorptionCells: 0 }).limit).toBe(0);
   });
-  test("the cash cap leaves the reserve (never below the study's) and counts a month of the surplus", () => {
-    expect(capitalReserve(null)).toBe(DEVIATION_RESERVE);
-    expect(capitalReserve(10_000_000)).toBeGreaterThan(DEVIATION_RESERVE);
-    expect(capitalAreaCap({ treasury: 100_000, monthlyBalance: 0, monthlyMaintenance: null })).toBe(0);
+  test("the cash cap leaves the fuse's reserve — nothing at all for a city that earns more than it spends — and counts a month of the surplus", () => {
+    // No fuse, no maintenance figure and no monthly balance: no reserve is held back. The flat 150,000 that used to stand here held a profitable city's
+    // own cash back (live 2026-10-08: +705,599 a month, 53,148 in hand, no land bought and no district priced).
+    expect(capitalReserve(null)).toBe(0);
+    expect(capitalReserve(10_000_000)).toBeGreaterThan(0);
+    // 100,000 with a balanced budget pays for a small district; with a 60,000 a month deficit it pays for nothing (two months of outflow is the reserve).
+    expect(capitalAreaCap({ treasury: 100_000, monthlyBalance: 0, monthlyMaintenance: null })).toBeGreaterThan(0);
     expect(capitalAreaCap({ treasury: 100_000, monthlyBalance: 60_000, monthlyMaintenance: null })).toBeGreaterThan(0);
     expect(capitalAreaCap({ treasury: 100_000, monthlyBalance: -60_000, monthlyMaintenance: null })).toBe(0);
   });
@@ -509,9 +512,10 @@ describe("V2 in the district builder", () => {
   });
 
   test("a batch the size of one template district is one district", async () => {
-    // (220,000 - 150,000 reserve) x 0.8 / 0.3 = about 187,000 m2: one template district at most, and less than a district left over.
+    // No reserve is held back for a city that earns what it spends, so the batch is 0.8 x 90,000 / 0.3 = 240,000 m2: one template district (200,704 m2 at
+    // most) and 39,296 m2 left over — below the 40,000 m2 a district has to reach, so no second one is opened.
     const result = await new DistrictBuilder(harness({ series: growingSeries(200), mix: mixWith(byDensity([40_000, 100, 30], [8_000, 100, 80])) }), { maximumSitesPerCycle: 1 })
-      .runCycle(cycleInput({ finance: { treasury: 220_000, monthlyBalance: 0 } }));
+      .runCycle(cycleInput({ finance: { treasury: 90_000, monthlyBalance: 0 } }));
     expect(result.status).toBe("BUILT");
     expect(result.notes.join(" | ")).not.toMatch(/district 2 of the same batch/);
   });

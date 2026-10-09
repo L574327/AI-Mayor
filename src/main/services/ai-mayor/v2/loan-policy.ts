@@ -100,7 +100,10 @@ export function decideLoan(input: {
     const amount = Math.min(loan.amount, treasury - KEEP_RESERVES_AFTER_REPAYING * EXPANSION_DEVIATION_RESERVE);
     if (amount >= BORROW_STEP / 2) return { action: "REPAY", amount: Math.floor(amount / 1_000) * 1_000, reason: "the treasury stands well above the reserve" };
   }
-  const required = expansionCashRequired(monthlyBalance) + PLANNED_BUILD_COST;
+  // The loan rules keep their own yardstick — "comfortable cash" (`EXPANSION_DEVIATION_RESERVE`), deliberately apart from the land rule, which no longer
+  // holds a fixed reserve at all: a city one build short still borrows for it, which is the point of the credit line (the guides: loans are the fastest lump
+  // sum, taken for what the city cannot yet pay for out of earnings).
+  const required = EXPANSION_DEVIATION_RESERVE + expansionCashRequired(monthlyBalance) + PLANNED_BUILD_COST;
   if (treasury >= required) return { action: "NONE", reason: "the cash already covers the next build" };
   const blocked = input.block && input.now
     ? !stampElapsed(input.block.since, input.now, input.block.hours, input.block.cycles)

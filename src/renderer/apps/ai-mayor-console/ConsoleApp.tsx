@@ -49,7 +49,12 @@ export default function ConsoleApp() {
   const [assist, setAssist] = useState<{ code: string; requestText: string } | null>(null);
   const [reply, setReply] = useState("");
   const [replyCheck, setReplyCheck] = useState<ReplyCheck | null>(null);
-  const [result, setResult] = useState<{ ok: boolean; detail: string; notes: string[] } | null>(null);
+  /**
+   * A sent instruction's outcome. `understood` is what the sentence was read as (the local reading, or the AI's), `unsupported` what was read but cannot be
+   * done — the two things a player needs to tell "it did not understand" from "it understood and cannot" (live 2026-10-09: neither was ever shown; the
+   * summary was parsed on every keystroke and thrown away), and `queued` marks an instruction the console stopped waiting for but the engine still holds.
+   */
+  const [result, setResult] = useState<{ ok: boolean; detail: string; notes: string[]; queued?: boolean; understood?: string; unsupported?: string[] } | null>(null);
   const [busy, setBusy] = useState(false);
   const [details, setDetails] = useState(false);
   const [commentaryOn, setCommentaryOn] = useState(() => { try { return window.localStorage.getItem("ai-mayor-console-commentary") !== "off"; } catch { return true; } });
@@ -147,8 +152,11 @@ export default function ConsoleApp() {
   const connected = state?.gameConnection === "CONNECTED";
   const active = phase === "RUNNING" || phase === "PAUSING" || phase === "PAUSED" || phase === "WAITING_FOR_GAME" || phase === "BACKING_UP" || phase === "STARTING";
   const run = async (fn: () => Promise<unknown>) => { setBusy(true); try { const next = await fn(); if (next && typeof next === "object" && "phase" in (next as object)) setState((previous) => ({ ...(previous ?? {}), ...(next as FullState) })); } finally { setBusy(false); } };
-  const finish = (outcome: { ok: boolean; detail?: string; notes?: string[] }) => {
-    setResult({ ok: outcome.ok, detail: outcome.detail ?? "", notes: Array.isArray(outcome.notes) ? outcome.notes : [] });
+  const finish = (outcome: { ok: boolean; detail?: string; notes?: string[]; queued?: boolean; parsed?: { summary?: string } | null; intent?: { unsupported?: string[] } | null }) => {
+    const unsupported = outcome.intent?.unsupported ?? (outcome as { unsupported?: string[] }).unsupported ?? [];
+    setResult({ ok: outcome.ok, detail: outcome.detail ?? "", notes: Array.isArray(outcome.notes) ? outcome.notes : [], ...(outcome.queued === true ? { queued: true } : {}),
+      ...(outcome.parsed?.summary ? { understood: outcome.parsed.summary } : {}),
+      ...(Array.isArray(unsupported) && unsupported.length > 0 ? { unsupported: unsupported.map(String) } : {}) });
     if (outcome.ok) { setText(""); setAssist(null); setReply(""); }
   };
 
@@ -308,7 +316,21 @@ export default function ConsoleApp() {
           onKeyDown={(event) => { if (event.key === "Enter" && text.trim() && !busy) { event.preventDefault(); void sendLine(); } }} />
         <button type="button" className="primary" disabled={busy || !text.trim() || !active} onClick={() => void sendLine()}>{t("box.send")}</button>
       </section>
-      {result ? <p className={`mc-hint ${result.ok ? "pos" : "neg"} mc-say-result`}>{result.ok ? (result.notes[0] ?? t("result.sent")) : `${t("result.failed")}${result.detail}`}</p> : null}
+      {/* The local reading while typing: free and offline, and the player's only sight of how the sentence is understood before sending it (the parse was
+          computed on every keystroke and thrown away until 2026-10-09). */}
+      {!result && text.trim() && parsed ? (
+        <p className="mc-hint">{t("box.understood")} {parsed.summary}{parsed.unsupported.length > 0 ? ` — ${t("box.partial")} ${parsed.unsupported.join(", ")}` : ""}</p>
+      ) : null}
+      {result ? (
+        <div className="mc-say-result">
+          {result.queued
+            ? <p className="mc-hint">{t("box.queued")}</p>
+            : <p className={`mc-hint ${result.ok ? "pos" : "neg"}`}>{result.ok ? (result.notes[0] ?? t("result.sent")) : `${t("result.failed")}${result.detail}`}</p>}
+          {result.understood ? <p className="mc-hint">{t("box.understood")} {result.understood}</p> : null}
+          {result.unsupported && result.unsupported.length > 0 ? <p className="mc-hint">{t("box.partial")} — {result.unsupported.join(", ")}</p> : null}
+          {details && result.notes.length > 1 ? <ul className="mc-notes">{result.notes.slice(1, 10).map((note, index) => <li key={index}>{note}</li>)}</ul> : null}
+        </div>
+      ) : null}
       {limitChips.length > 0 ? (
         <div className="mc-limits">
           <small>{t("limits.title")}</small>

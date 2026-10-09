@@ -142,12 +142,16 @@ export class MayorSupervisor extends EventEmitter {
     return this.#publish();
   }
 
-  command(text: string, instruction: import("./intent-lowering").Instruction, lang: "zh" | "en" = "zh"): Promise<{ ok: boolean; detail: string; notes?: string[] }> {
+  command(text: string, instruction: import("./intent-lowering").Instruction, lang: "zh" | "en" = "zh"): Promise<{ ok: boolean; detail: string; notes?: string[]; queued?: boolean }> {
     if (!this.#child || this.#childExited) return Promise.resolve({ ok: false, detail: "the Mayor is not running" });
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     this.#event("command", text);
     return new Promise((resolve) => {
-      const timer = setTimeout(() => { this.#pendingCommands.delete(id); resolve({ ok: false, detail: "the Mayor did not answer in time (it takes the instruction at the start of its next cycle)" }); }, 60_000);
+      // The engine holds the command in its queue and takes it at the start of a cycle, so a console that stops waiting must NOT read this as "it was not
+      // carried out": it may already be running, and the city sees it either way (live 2026-10-09: the console said the instruction failed while the
+      // Mayor went on and built it). `queued` says so; the late result finds no waiter and is dropped by design.
+      const timer = setTimeout(() => { this.#pendingCommands.delete(id); resolve({ ok: false, queued: true,
+        detail: "the console stopped waiting: the instruction is still queued in the engine and is taken on its next cycle" }); }, 60_000);
       this.#pendingCommands.set(id, (result) => { clearTimeout(timer); resolve(result); });
       this.#send({ k: "command", id, text, lang, instruction });
     });

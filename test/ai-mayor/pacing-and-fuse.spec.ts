@@ -3,15 +3,17 @@
  * flashing every cycle, 9,839 of 10,289 office cells empty while housing was the bottleneck, a cemetery placed with no money left for its road):
  * districts are template-sized and paced, sized under the fuse, and nothing that costs money is previewed once the fuse has said no.
  */
-import { capitalAreaCap, capitalReserve, DEVIATION_RESERVE, operatingReserve, OPERATING_RESERVE_MINIMUM, SNOWBALL_PIPELINE_CELLS, snowballPipelineCells } from "../../src/main/services/ai-mayor/v2/growth-policy";
+import { capitalAreaCap, capitalReserve, operatingReserve, OPERATING_RESERVE_MINIMUM, SNOWBALL_PIPELINE_CELLS, snowballPipelineCells } from "../../src/main/services/ai-mayor/v2/growth-policy";
 import { plannerSpendFloor, SPEND_FLOOR_ENV } from "../../src/main/services/ai-mayor/v2/spend-guard";
 import { emptyMix, targetShares, type ZoningMixSignals } from "../../src/main/services/ai-mayor/v2/zoning-mix";
 import { DISTRICT_LOCAL_ROAD_PREFAB, DISTRICT_ROAD_PREFAB, DistrictBuilder, type DistrictBuilderPort } from "../../src/main/services/ai-mayor/v2/district-builder";
 import { FRAMES_PER_GAME_DAY } from "../../src/main/services/ai-mayor/v2/growth-policy";
 
 describe("the batch is sized under the spending fuse", () => {
-  test("the reserve is the fuse's floor plus the operating band, never less than the old reserve", () => {
-    expect(capitalReserve(null, null)).toBe(DEVIATION_RESERVE);
+  test("the reserve is the fuse's floor plus the operating band — and nothing at all when there is no fuse and the city earns more than it spends", () => {
+    // The flat 150,000 that used to live here was a ⟨待标定⟩ starting value that never scaled with the city: it made a profitable city size its districts
+    // down to nothing and refuse land it could pay for (live 2026-10-08: +705,599 a month, 53,148 in hand, nothing bought and nothing priced).
+    expect(capitalReserve(null, null)).toBe(0);
     expect(capitalReserve(null, 330_000)).toBe(330_000 + operatingReserve(330_000));
     expect(operatingReserve(330_000)).toBe(66_000);
     expect(operatingReserve(10_000)).toBe(OPERATING_RESERVE_MINIMUM);

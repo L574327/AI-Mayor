@@ -27,18 +27,21 @@ describe("a young city with cash but no surplus is not left standing still for w
       expect(landPurchaseRunwayAffordable({ ...base, treasury: 800_000, monthlyBalance: 948 })).toBe(true);
     });
     test("control: cash that cannot carry the deficit for the whole runway is refused (so it never buys itself into a hole)", () => {
-      expect(landPurchaseRunwayAffordable({ ...base, treasury: 250_000, monthlyBalance: 948 })).toBe(false);
-      expect(250_000 - 100_000).toBeLessThan((20_000 - 948) * LAND_ESCAPE_RUNWAY_MONTHS);
+      expect(landPurchaseRunwayAffordable({ ...base, treasury: 150_000, monthlyBalance: 948 })).toBe(false);
+      // The arithmetic the rule is: 12 months of the deficit the tile adds (~19k a month) is ~229k, and 150k does not carry it.
+      expect(150_000).toBeLessThan((20_000 - 948) * LAND_ESCAPE_RUNWAY_MONTHS);
     });
-    test("control: the same cash gates as K34 hold (district reserve, unknown figures)", () => {
-      expect(landPurchaseRunwayAffordable({ ...base, treasury: 99_000, monthlyBalance: 50_000 })).toBe(false);
+    test("control: unknown figures still refuse, and a surplus city needs no buffer at all", () => {
+      // A city earning more than the tile costs carries no deficit to run down: its own cash is the gate (the flat 100,000 district reserve is gone —
+      // live 2026-10-08, a city with +705,599 a month and 99,000 in hand was refused every tile by it).
+      expect(landPurchaseRunwayAffordable({ ...base, treasury: 99_000, monthlyBalance: 50_000 })).toBe(true);
       expect(landPurchaseRunwayAffordable({ ...base, treasury: null, monthlyBalance: 50_000 })).toBe(false);
       expect(landPurchaseRunwayAffordable({ ...base, treasury: 800_000, monthlyBalance: null })).toBe(false);
     });
     test("a bigger measured upkeep needs more cash: the runway scales with what the tile really costs", () => {
-      // A measured addition is taken with a 25% margin: 50k -> 62.5k a month, a 61.5k deficit, 738k over 12 months: more than the 700k that is left.
-      expect(landPurchaseRunwayAffordable({ ...base, treasury: 800_000, monthlyBalance: 948, observedMarginalUpkeep: 50_000 })).toBe(false);
-      expect(landPurchaseRunwayAffordable({ ...base, treasury: 800_000, monthlyBalance: 948, observedMarginalUpkeep: 30_000 })).toBe(true);
+      // A measured addition is taken with a 25% margin: 50k -> 62.5k a month, a 61.5k deficit, 738k over 12 months; 30k -> 37.5k a month, 36.5k, 438k.
+      expect(landPurchaseRunwayAffordable({ ...base, treasury: 500_000, monthlyBalance: 948, observedMarginalUpkeep: 50_000 })).toBe(false);
+      expect(landPurchaseRunwayAffordable({ ...base, treasury: 500_000, monthlyBalance: 948, observedMarginalUpkeep: 30_000 })).toBe(true);
     });
   });
 
@@ -104,12 +107,20 @@ describe("a young city with cash but no surplus is not left standing still for w
       expect(result.waitReason).toBe("LAND_PURCHASE_UNAVAILABLE");
     });
 
-    test("control: cash that cannot carry the deficit is never spent on land, however long the city waits", async () => {
-      const { cycle, state, bought } = run({ treasury: 250_000, monthlyBalance: 948 });
-      await cycle();
-      state.frame += 10 * HOUR;
-      expect((await cycle()).waitReason).toBe("LAND_FINANCE_HELD");
-      expect(bought).toHaveLength(0);
+    test("the escape buys on cash that can carry the tile's whole runway, and a city that cannot carry it is still held", async () => {
+      // ~19k a month of deficit over the 12-month runway is ~229k: 100,000 does not carry it, so the city waits.
+      const held = run({ treasury: 100_000, monthlyBalance: 948 });
+      await held.cycle();
+      held.state.frame += 10 * HOUR;
+      expect((await held.cycle()).waitReason).toBe("LAND_FINANCE_HELD");
+      expect(held.bought).toHaveLength(0);
+      // The same city with 250,000 does carry it, so it buys the tile instead of standing still (the flat 100,000 reserve that used to refuse this was
+      // the district reserve K34 held back; live 2026-10-05: 70 of 83 cycles LAND_FINANCE_HELD with 800,000 in the bank).
+      const escaped = run({ treasury: 250_000, monthlyBalance: 948 });
+      await escaped.cycle();
+      escaped.state.frame += 10 * HOUR;
+      expect((await escaped.cycle()).status).toBe("LAND_PURCHASED");
+      expect(escaped.bought).toHaveLength(1);
     });
 
     test("control: a surplus that covers the tile still buys at once, by K34, with no escape note", async () => {

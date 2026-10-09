@@ -26,6 +26,11 @@ export const zonedShare = (spacing: number, roadWidthMeters: number): number => 
 export const GOLDEN_SPACING_METERS = optimalSpacing(ROAD_WIDTH_METERS.small);
 /** A lot this many cells or more on BOTH sides is a big service (cemetery, hospital, high school, depot): it takes a whole grid cell. */
 export const BIG_SERVICE_LOT_CELLS = 10;
+/** Blocks of the district's own grid a piece of leftover land must hold to be worth a (mini) district: 2 x 1 and up. */
+export const MINIMUM_DISTRICT_BLOCKS = 2;
+/** Whether a piece of free land holds a district of its own: `MINIMUM_DISTRICT_BLOCKS` whole cells of the district's grid, 2 x 1 and up. */
+export const holdsMiniDistrict = (widthMeters: number, depthMeters: number, spacing = GOLDEN_SPACING_METERS): boolean =>
+  Math.floor(widthMeters / spacing) * Math.floor(depthMeters / spacing) >= MINIMUM_DISTRICT_BLOCKS;
 /** All the ground a cell has between its streets. */
 export const cellInteriorMeters = (spacing: number, roadWidthMeters: number): number => spacing - roadWidthMeters;
 /** The longer side of a lot, in metres (a lot cell is 8 m). */
